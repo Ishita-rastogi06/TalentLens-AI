@@ -317,241 +317,253 @@ const COLORS = ["#c3955b", "#7b3048"];
           </>
 
         )}        {activeTab==="analysis" && result && (
+
           <>
-            <h1>Resume Analysis</h1>
+
+            <h1>
+              Resume Analysis
+            </h1>
 
             <div className="result-panel">
 
-              {/* ── JD Meta banner ── */}
-              {result.parsed_jd && result.parsed_jd.job_title !== "Unknown" && (
-                <div className="jd-meta-banner">
-                  <span className="jd-meta-item">
-                    <span className="jd-meta-icon">💼</span>
-                    <strong>{result.parsed_jd.job_title}</strong>
-                  </span>
-                  {result.parsed_jd.seniority && result.parsed_jd.seniority !== "unknown" && (
-                    <span className="jd-meta-item">
-                      <span className="jd-meta-icon">📈</span>
-                      {result.parsed_jd.seniority.charAt(0).toUpperCase() + result.parsed_jd.seniority.slice(1)} level
-                    </span>
-                  )}
-                  {result.parsed_jd.years_experience_required > 0 && (
-                    <span className="jd-meta-item">
-                      <span className="jd-meta-icon">🗓</span>
-                      {result.parsed_jd.years_experience_required}+ yrs required
-                    </span>
-                  )}
-                  <span className="jd-meta-item">
-                    <span className="jd-meta-icon">📋</span>
-                    {result.parsed_jd.total_requirements} requirements parsed
-                  </span>
-                </div>
-              )}
+              <div className="result-card">
 
-              {/* ── ATS Score Hero ── */}
-              <div className="result-card ats-score-card">
-                <div className="ats-score-layout">
-                  <div className="ats-ring-wrap">
-                    <svg viewBox="0 0 120 120" className="ats-ring-svg">
-                      <circle cx="60" cy="60" r="52" className="ats-ring-bg"/>
-                      <circle
-                        cx="60" cy="60" r="52"
-                        className="ats-ring-fill"
-                        strokeDasharray={`${result.score * 3.267} 326.7`}
-                        strokeDashoffset="0"
-                        transform="rotate(-90 60 60)"
-                      />
-                    </svg>
-                    <div className="ats-ring-inner">
-                      <span className="ats-ring-number">{result.score}</span>
-                      <span className="ats-ring-denom">/ 100</span>
-                    </div>
-                  </div>
-                  <div className="ats-score-info">
-                    <div className="ats-verdict-badge">{result.verdict}</div>
-                    <p className="ats-confidence-text">Match confidence: <strong>{result.confidence}%</strong></p>
-                    <div className="ats-components-list">
-                      {result.score_components && Object.entries({
-                        "Skill Match":           { pts: result.score_components.skill_match,          max: 35 },
-                        "Requirement Coverage":  { pts: result.score_components.requirement_coverage, max: 30 },
-                        "Experience Fit":        { pts: result.score_components.experience_fit,       max: 20 },
-                        "Profile Signals":       { pts: result.score_components.profile_signals,      max: 15 },
-                      }).map(([label, { pts, max }]) => (
-                        <div className="ats-comp-row" key={label}>
-                          <span className="ats-comp-label">{label}</span>
-                          <div className="ats-comp-bar-wrap">
-                            <div className="ats-comp-bar">
-                              <div className="ats-comp-bar-fill" style={{width:`${(pts/max)*100}%`}}/>
-                            </div>
-                          </div>
-                          <span className="ats-comp-pts">{pts}<span className="ats-comp-max">/{max}</span></span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                <h2>
+                  ATS Score : {result.score}%
+                </h2>
+
+                <h3>
+                  {result.verdict}
+                </h3>
+
+                <div className="progress">
+
+                  <div
+                    className="progress-fill"
+                    style={{
+                      width:`${result.score}%`
+                    }}
+                  ></div>
+
                 </div>
+
               </div>
 
-              {/* ── Resume Summary ── */}
-              <div className="result-card ai-card">
-                <h3 className="section-heading">📄 Recruiter Summary</h3>
-                <p className="ai-text">{result.resume_summary || "—"}</p>
-              </div>
 
-              {/* ── Semantic Alignment ── */}
-              {result.semantic_similarity && (
-                <div className="result-card">
-                  <h3 className="section-heading">🧠 Semantic Alignment</h3>
-                  <p className="section-subtext">
-                    Passage-level similarity between your resume and the job description — measures contextual fit beyond keyword overlap.
-                  </p>
-                  <div className="sem-grid">
-                    {[
-                      { label: "Overall Document",    key: "overall",            icon: "📄" },
-                      { label: "Skills Section",       key: "skills_section",     icon: "🛠" },
-                      { label: "Experience Section",   key: "experience_section", icon: "💼" },
-                      { label: "Education Section",    key: "education_section",  icon: "🎓" },
-                    ].map(({ label, key, icon }) => {
-                      const val = result.semantic_similarity[key] ?? 0;
-                      const color = val >= 65 ? "#2e7d32" : val >= 45 ? "#c3955b" : "#c62828";
-                      return (
-                        <div className="sem-item" key={key}>
-                          <div className="sem-row">
-                            <span className="sem-label">{icon} {label}</span>
-                            <span className="sem-pct" style={{color}}>{val}%</span>
-                          </div>
-                          <div className="progress">
-                            <div className="progress-fill" style={{width:`${val}%`, background: color}}/>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
 
-              {/* ── Requirement Coverage ── */}
-              {(result.requirement_coverage || []).length > 0 && (
-                <div className="result-card">
-                  <h3 className="section-heading">📋 JD Requirement Coverage</h3>
-                  <p className="section-subtext">
-                    Each JD requirement matched against your resume passages — the same way enterprise ATS platforms score fit.
-                  </p>
-                  <div className="req-coverage-list">
-                    {result.requirement_coverage.map((r, i) => {
-                      const badgeClass = {
-                        strong: "req-badge-strong",
-                        partial: "req-badge-partial",
-                        weak: "req-badge-weak",
-                        missing: "req-badge-missing",
-                      }[r.match_type] || "req-badge-missing";
-                      const pct = Math.round(r.coverage * 100);
-                      return (
-                        <div className="req-row" key={i}>
-                          <div className="req-row-top">
-                            <span className="req-text">{r.requirement}</span>
-                            <span className={`req-badge ${badgeClass}`}>
-                              {r.match_type}
-                            </span>
-                          </div>
-                          <div className="req-row-bottom">
-                            <div className="progress req-progress">
-                              <div className="progress-fill" style={{width:`${pct}%`}}/>
-                            </div>
-                            <span className="req-pct">{pct}%</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* ── Skills ── */}
               <div className="grid">
+
                 <div className="result-card">
-                  <h3 className="section-heading">✅ Matched Skills</h3>
-                  <div className="skill-tag-list">
-                    {(result.matched_skills || []).map((skill, i) => (
-                      <span key={i} className="skill-tag skill-tag-matched">{skill}</span>
+
+                  <h3>
+                    ✅ Matched Skills
+                  </h3>
+
+                  <ul>
+
+                    {(result.matched_skills || []).map((skill,i)=>(
+
+                      <li key={i}>
+                        {skill}
+                      </li>
+
                     ))}
-                    {!(result.matched_skills || []).length && <p className="empty-msg">None matched.</p>}
-                  </div>
+
+                  </ul>
+
                 </div>
+
+
+
                 <div className="result-card">
-                  <h3 className="section-heading">❌ Missing Skills</h3>
-                  <div className="skill-tag-list">
-                    {(result.missing_skills || []).map((skill, i) => (
-                      <span key={i} className="skill-tag skill-tag-missing">{skill}</span>
+
+                  <h3>
+                    ❌ Missing Skills
+                  </h3>
+
+                  <ul>
+
+                    {(result.missing_skills || []).map((skill,i)=>(
+
+                      <li key={i}>
+                        {skill}
+                      </li>
+
                     ))}
-                    {!(result.missing_skills || []).length && <p className="empty-msg">No gaps found.</p>}
-                  </div>
+
+                  </ul>
+
                 </div>
+
               </div>
 
-              {/* ── Strengths & Weaknesses ── */}
+
+
               <div className="grid">
-                <div className="result-card ai-card">
-                  <h3 className="section-heading">💪 Strengths</h3>
-                  <ul className="ai-list ai-list-strengths">
-                    {(result.strengths || []).map((item, i) => (
-                      <li key={i}>{typeof item === "object" ? item.strength : item}</li>
+
+                <div className="result-card">
+
+                  <h3>
+                    💪 Strengths
+                  </h3>
+
+                  <ul>
+
+                    {(result.strengths || []).map((item,i)=>(
+
+                      <li key={i}>
+
+                        {
+                          typeof item==="object"
+                          ?
+                          item.strength
+                          :
+                          item
+                        }
+
+                      </li>
+
                     ))}
-                    {!(result.strengths || []).length && <li className="empty-msg">—</li>}
+
                   </ul>
+
                 </div>
-                <div className="result-card ai-card">
-                  <h3 className="section-heading">⚠️ Weaknesses</h3>
-                  <ul className="ai-list ai-list-weaknesses">
-                    {(result.weaknesses || []).map((item, i) => (
-                      <li key={i}>{typeof item === "object" ? item.weakness : item}</li>
+
+
+
+                <div className="result-card">
+
+                  <h3>
+                    ⚠ Weaknesses
+                  </h3>
+
+                  <ul>
+
+                    {(result.weaknesses || []).map((item,i)=>(
+
+                      <li key={i}>
+
+                        {
+                          typeof item==="object"
+                          ?
+                          item.weakness
+                          :
+                          item
+                        }
+
+                      </li>
+
                     ))}
-                    {!(result.weaknesses || []).length && <li className="empty-msg">—</li>}
+
                   </ul>
+
                 </div>
+
+              </div>              <div className="result-card">
+
+                <h3>📄 Resume Summary</h3>
+
+                <p>
+                  {result.resume_summary}
+                </p>
+
               </div>
 
-              {/* ── Improvements ── */}
-              <div className="result-card ai-card">
-                <h3 className="section-heading">🚀 Improvement Suggestions</h3>
-                <ol className="ai-list ai-list-improvements">
-                  {(result.improvements || []).map((item, i) => (
-                    <li key={i}>{typeof item === "object" ? item.improvement : item}</li>
+
+
+              <div className="result-card">
+
+                <h3>🚀 Improvement Suggestions</h3>
+
+                <ul>
+
+                  {(result.improvements || []).map((item,i)=>(
+
+                    <li key={i}>
+
+                      {
+                        typeof item==="object"
+                        ?
+                        item.improvement
+                        :
+                        item
+                      }
+
+                    </li>
+
                   ))}
-                  {!(result.improvements || []).length && <li className="empty-msg">—</li>}
-                </ol>
+
+                </ul>
+
               </div>
 
-              {/* ── Reasoning ── */}
-              <div className="result-card ai-card">
-                <h3 className="section-heading">📌 Why This Score?</h3>
-                <p className="ai-text">{result.reasoning || "—"}</p>
+
+
+              <div className="result-card">
+
+                <h3>📌 Why this Score?</h3>
+
+                <p>
+                  {result.reasoning}
+                </p>
+
               </div>
 
-              {/* ── Skill Breakdown ── */}
-              {Object.keys(result.skill_scores || {}).length > 0 && (
-                <div className="result-card">
-                  <h3 className="section-heading">📊 Skill Breakdown</h3>
-                  <div className="skill-breakdown-list">
-                    {Object.entries(result.skill_scores || {}).map(([skill, value]) => {
-                      const color = value === 100 ? "#2e7d32" : value >= 80 ? "#c3955b" : "#c62828";
-                      const label = value === 100 ? "✓ Exact" : value >= 80 ? "≈ Semantic" : "✗ Missing";
-                      return (
-                        <div className="skill-bd-row" key={skill}>
-                          <span className="skill-bd-name">{skill}</span>
-                          <div className="progress skill-bd-bar">
-                            <div className="progress-fill" style={{width:`${value}%`, background: color}}/>
-                          </div>
-                          <span className="skill-bd-label" style={{color}}>{label}</span>
+
+
+              <div className="result-card">
+
+                <h3>📊 Skill Breakdown</h3>
+
+                {
+
+                  Object.entries(result.skill_scores || {}).map(
+
+                    ([skill,value])=>(
+
+                      <div
+                        key={skill}
+                        style={{marginBottom:18}}
+                      >
+
+                        <div
+                          style={{
+                            display:"flex",
+                            justifyContent:"space-between"
+                          }}
+                        >
+
+                          <span>{skill}</span>
+
+                          <span>{value}%</span>
+
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+
+                        <div className="progress">
+
+                          <div
+                            className="progress-fill"
+                            style={{
+                              width:`${value}%`
+                            }}
+                          ></div>
+
+                        </div>
+
+                      </div>
+
+                    )
+
+                  )
+
+                }
+
+              </div>
 
             </div>
+
           </>
+
         )}
 
 

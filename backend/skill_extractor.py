@@ -175,6 +175,7 @@ def extract_skills_groq(text: str) -> list[str]:
                 },
             ],
             temperature=0.0,
+            timeout=30,
         )
         raw = resp.choices[0].message.content or ""
         raw = raw.replace("```json", "").replace("```", "").strip()
@@ -182,7 +183,7 @@ def extract_skills_groq(text: str) -> list[str]:
         skills = [s.strip().lower() for s in data.get("skills", []) if isinstance(s, str)]
         return skills
     except Exception as exc:
-        logger.debug("Groq skill extraction failed: %s", exc)
+        logger.debug("Groq skill extraction failed (%s): %s", type(exc).__name__, exc)
         return []
 
 

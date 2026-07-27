@@ -89,6 +89,7 @@ def parse_jd_with_groq(jd_text: str) -> Optional[dict]:
     """
     client = _get_client()
     if client is None:
+        logger.warning("Groq client not initialized.")
         return None
 
     model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
@@ -109,12 +110,18 @@ def parse_jd_with_groq(jd_text: str) -> Optional[dict]:
                 },
             ],
             temperature=0.1,
+            timeout=45,
         )
         raw = resp.choices[0].message.content or ""
         raw = raw.replace("```json", "").replace("```", "").strip()
-        return json.loads(raw)
+        parsed = json.loads(raw)
+        logger.info("JD parsed successfully with Groq")
+        return parsed
+    except json.JSONDecodeError as exc:
+        logger.warning("JD Groq response was not valid JSON: %s. Using fallback.", exc)
+        return None
     except Exception as exc:
-        logger.warning("JD Groq parse failed: %s", exc)
+        logger.warning("JD Groq parse failed (%s): %s. Using fallback.", type(exc).__name__, exc)
         return None
 
 

@@ -119,6 +119,9 @@ const lowestScore =
 
     try {
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 min timeout
+
       const response = await fetch(
 
         "http://127.0.0.1:8000/analyze",
@@ -128,10 +131,13 @@ const lowestScore =
           method: "POST",
 
           body: formData,
+          signal: controller.signal,
 
         }
 
       );
+
+      clearTimeout(timeoutId);
 
       const data = await response.json();
 
@@ -150,8 +156,11 @@ const lowestScore =
     catch (err) {
 
       console.log(err);
-
-      alert("Backend Error");
+      if (err.name === 'AbortError') {
+        alert("Analysis taking too long. Please check backend is running on http://127.0.0.1:8000");
+      } else {
+        alert("Backend Error: " + err.message);
+      }
 
     }
 
@@ -434,236 +443,205 @@ pdf.text(`Verdict: ${verdict}`, 14, 69);
 
             <h1>Candidate Analysis</h1>
             <div style={{ marginBottom: "20px" }}>
-              <button
-                onClick={exportPDF}
-                style={{
-                  padding: "12px 20px",
-                  border: "none",
-                  borderRadius: "10px",
-                  cursor: "pointer",
-                  background: "linear-gradient(90deg,#7b3048,#c3955b)",
-                  color: "#fff",
-                  fontWeight: "600",
-                  fontSize: "15px",
-                }}
-              >
-                📄 Export PDF
-              </button>
-            </div>
+  <button
+    onClick={exportPDF}
+    style={{
+      padding: "12px 20px",
+      border: "none",
+      borderRadius: "10px",
+      cursor: "pointer",
+      background: "linear-gradient(90deg,#7b3048,#c3955b)",
+      color: "#fff",
+      fontWeight: "600",
+      fontSize: "15px",
+    }}
+  >
+    📄 Export PDF
+  </button>
+</div>
 
-            <div className="result-panel" id="analysis-report">
+            <div
+  className="result-panel"
+  id="analysis-report"
+>
 
-              {/* JD Meta */}
-              {selectedCandidate.parsed_jd && selectedCandidate.parsed_jd.job_title !== "Unknown" && (
-                <div className="jd-meta-banner">
-                  <span className="jd-meta-item">
-                    <span className="jd-meta-icon">💼</span>
-                    <strong>{selectedCandidate.parsed_jd.job_title}</strong>
-                  </span>
-                  {selectedCandidate.parsed_jd.seniority !== "unknown" && (
-                    <span className="jd-meta-item">
-                      <span className="jd-meta-icon">📈</span>
-                      {selectedCandidate.parsed_jd.seniority.charAt(0).toUpperCase() + selectedCandidate.parsed_jd.seniority.slice(1)} level
-                    </span>
-                  )}
-                  {selectedCandidate.parsed_jd.years_experience_required > 0 && (
-                    <span className="jd-meta-item">
-                      <span className="jd-meta-icon">🗓</span>
-                      {selectedCandidate.parsed_jd.years_experience_required}+ yrs required
-                    </span>
-                  )}
+              <div className="result-card">
+
+                <h2>
+                  #{selectedCandidate.rank} {selectedCandidate.name}
+                </h2>
+
+                <h1>{selectedCandidate.score}%</h1>
+
+                <h3>{selectedCandidate.verdict}</h3>
+
+                <br />
+
+                <div className="progress">
+
+                  <div
+                    className="progress-fill"
+                    style={{
+                      width: `${selectedCandidate.score}%`,
+                    }}
+                  ></div>
+
                 </div>
-              )}
 
-              {/* Score card */}
-              <div className="result-card ats-score-card">
-                <div className="ats-score-layout">
-                  <div className="ats-ring-wrap">
-                    <svg viewBox="0 0 120 120" className="ats-ring-svg">
-                      <circle cx="60" cy="60" r="52" className="ats-ring-bg"/>
-                      <circle
-                        cx="60" cy="60" r="52"
-                        className="ats-ring-fill"
-                        strokeDasharray={`${selectedCandidate.score * 3.267} 326.7`}
-                        strokeDashoffset="0"
-                        transform="rotate(-90 60 60)"
-                      />
-                    </svg>
-                    <div className="ats-ring-inner">
-                      <span className="ats-ring-number">{selectedCandidate.score}</span>
-                      <span className="ats-ring-denom">/ 100</span>
-                    </div>
-                  </div>
-                  <div className="ats-score-info">
-                    <h2 style={{marginBottom:4, color:"#5b6e74"}}>#{selectedCandidate.rank} {selectedCandidate.name}</h2>
-                    <div className="ats-verdict-badge">{selectedCandidate.verdict}</div>
-                    <p className="ats-confidence-text">Confidence: <strong>{selectedCandidate.confidence}%</strong></p>
-                    <div className="ats-components-list">
-                      {selectedCandidate.score_components && Object.entries({
-                        "Skill Match":          { pts: selectedCandidate.score_components.skill_match,          max: 35 },
-                        "Req. Coverage":        { pts: selectedCandidate.score_components.requirement_coverage, max: 30 },
-                        "Experience Fit":       { pts: selectedCandidate.score_components.experience_fit,       max: 20 },
-                        "Profile Signals":      { pts: selectedCandidate.score_components.profile_signals,      max: 15 },
-                      }).map(([label, { pts, max }]) => (
-                        <div className="ats-comp-row" key={label}>
-                          <span className="ats-comp-label">{label}</span>
-                          <div className="ats-comp-bar-wrap">
-                            <div className="ats-comp-bar">
-                              <div className="ats-comp-bar-fill" style={{width:`${(pts/max)*100}%`}}/>
-                            </div>
-                          </div>
-                          <span className="ats-comp-pts">{pts}<span className="ats-comp-max">/{max}</span></span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
               </div>
 
-              {/* Resume Summary */}
-              <div className="result-card ai-card">
-                <h3 className="section-heading">📄 Recruiter Summary</h3>
-                <p className="ai-text">{selectedCandidate.resume_summary || "—"}</p>
-              </div>
 
-              {/* Semantic Alignment */}
-              {selectedCandidate.semantic_similarity && (
-                <div className="result-card">
-                  <h3 className="section-heading">🧠 Semantic Alignment</h3>
-                  <p className="section-subtext">
-                    Passage-level similarity between resume and job description.
-                  </p>
-                  <div className="sem-grid">
-                    {[
-                      { label: "Overall Document",   key: "overall",            icon: "📄" },
-                      { label: "Skills Section",      key: "skills_section",     icon: "🛠" },
-                      { label: "Experience Section",  key: "experience_section", icon: "💼" },
-                      { label: "Education Section",   key: "education_section",  icon: "🎓" },
-                    ].map(({ label, key, icon }) => {
-                      const val = selectedCandidate.semantic_similarity[key] ?? 0;
-                      const color = val >= 65 ? "#2e7d32" : val >= 45 ? "#c3955b" : "#c62828";
-                      return (
-                        <div className="sem-item" key={key}>
-                          <div className="sem-row">
-                            <span className="sem-label">{icon} {label}</span>
-                            <span className="sem-pct" style={{color}}>{val}%</span>
-                          </div>
-                          <div className="progress">
-                            <div className="progress-fill" style={{width:`${val}%`, background: color}}/>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
 
-              {/* Requirement Coverage */}
-              {(selectedCandidate.requirement_coverage || []).length > 0 && (
-                <div className="result-card">
-                  <h3 className="section-heading">📋 JD Requirement Coverage</h3>
-                  <p className="section-subtext">
-                    Each JD requirement matched against resume passages via semantic embeddings.
-                  </p>
-                  <div className="req-coverage-list">
-                    {selectedCandidate.requirement_coverage.map((r, i) => {
-                      const badgeClass = {
-                        strong: "req-badge-strong",
-                        partial: "req-badge-partial",
-                        weak: "req-badge-weak",
-                        missing: "req-badge-missing",
-                      }[r.match_type] || "req-badge-missing";
-                      const pct = Math.round(r.coverage * 100);
-                      return (
-                        <div className="req-row" key={i}>
-                          <div className="req-row-top">
-                            <span className="req-text">{r.requirement}</span>
-                            <span className={`req-badge ${badgeClass}`}>{r.match_type}</span>
-                          </div>
-                          <div className="req-row-bottom">
-                            <div className="progress req-progress">
-                              <div className="progress-fill" style={{width:`${pct}%`}}/>
-                            </div>
-                            <span className="req-pct">{pct}%</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Skills */}
               <div className="grid">
+
                 <div className="result-card">
-                  <h3 className="section-heading">✅ Matched Skills</h3>
-                  <div className="skill-tag-list">
-                    {(selectedCandidate.matched_skills || []).map((skill, i) => (
-                      <span key={i} className="skill-tag skill-tag-matched">{skill}</span>
+
+                  <h3>✅ Matched Skills</h3>
+
+                  <ul>
+
+                    {(selectedCandidate.matched_skills || []).map((skill, index) => (
+
+                      <li key={index}>{skill}</li>
+
                     ))}
-                  </div>
+
+                  </ul>
+
                 </div>
+
+
+
                 <div className="result-card">
-                  <h3 className="section-heading">❌ Missing Skills</h3>
-                  <div className="skill-tag-list">
-                    {(selectedCandidate.missing_skills || []).map((skill, i) => (
-                      <span key={i} className="skill-tag skill-tag-missing">{skill}</span>
+
+                  <h3>❌ Missing Skills</h3>
+
+                  <ul>
+
+                    {(selectedCandidate.missing_skills || []).map((skill, index) => (
+
+                      <li key={index}>{skill}</li>
+
                     ))}
-                  </div>
+
+                  </ul>
+
                 </div>
+
               </div>
 
-              {/* Strengths & Weaknesses */}
+
+
               <div className="grid">
-                <div className="result-card ai-card">
-                  <h3 className="section-heading">💪 Strengths</h3>
-                  <ul className="ai-list ai-list-strengths">
-                    {(selectedCandidate.strengths || []).map((item, i) => (
-                      <li key={i}>{typeof item === "object" ? item.strength : item}</li>
+
+                <div className="result-card">
+
+                  <h3>💪 Strengths</h3>
+
+                  <ul>
+
+                    {(selectedCandidate.strengths || []).map((item, index) => (
+
+                      <li key={index}>
+
+                        {typeof item === "object" ? item.strength : item}
+
+                      </li>
+
                     ))}
+
                   </ul>
+
                 </div>
-                <div className="result-card ai-card">
-                  <h3 className="section-heading">⚠️ Weaknesses</h3>
-                  <ul className="ai-list ai-list-weaknesses">
-                    {(selectedCandidate.weaknesses || []).map((item, i) => (
-                      <li key={i}>{typeof item === "object" ? item.weakness : item}</li>
+
+
+
+                <div className="result-card">
+
+                  <h3>⚠ Weaknesses</h3>
+
+                  <ul>
+
+                    {(selectedCandidate.weaknesses || []).map((item, index) => (
+
+                      <li key={index}>
+
+                        {typeof item === "object" ? item.weakness : item}
+
+                      </li>
+
                     ))}
+
                   </ul>
+
                 </div>
+
+              </div>              <div className="result-card">
+
+                <h3>📄 Resume Summary</h3>
+
+                <p>{selectedCandidate.resume_summary}</p>
+
               </div>
 
-              {/* Improvements */}
-              <div className="result-card ai-card">
-                <h3 className="section-heading">🚀 Improvement Suggestions</h3>
-                <ol className="ai-list ai-list-improvements">
-                  {(selectedCandidate.improvements || []).map((item, i) => (
-                    <li key={i}>{typeof item === "object" ? item.improvement : item}</li>
+
+
+              <div className="result-card">
+
+                <h3>🚀 Improvement Suggestions</h3>
+
+                <ul>
+
+                  {(selectedCandidate.improvements || []).map((item, index) => (
+
+                    <li key={index}>
+
+                      {typeof item === "object" ? item.improvement : item}
+
+                    </li>
+
                   ))}
-                </ol>
+
+                </ul>
+
               </div>
 
-              {/* Skill Breakdown */}
-              {Object.keys(selectedCandidate.skill_scores || {}).length > 0 && (
-                <div className="result-card">
-                  <h3 className="section-heading">📊 Skill Breakdown</h3>
-                  <div className="skill-breakdown-list">
-                    {Object.entries(selectedCandidate.skill_scores || {}).map(([skill, value]) => {
-                      const color = value === 100 ? "#2e7d32" : value >= 80 ? "#c3955b" : "#c62828";
-                      const label = value === 100 ? "✓ Exact" : value >= 80 ? "≈ Semantic" : "✗ Missing";
-                      return (
-                        <div className="skill-bd-row" key={skill}>
-                          <span className="skill-bd-name">{skill}</span>
-                          <div className="progress skill-bd-bar">
-                            <div className="progress-fill" style={{width:`${value}%`, background: color}}/>
-                          </div>
-                          <span className="skill-bd-label" style={{color}}>{label}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+
+
+              <div className="result-card">
+
+                <h3>📊 Skill Breakdown</h3>
+
+                {Object.entries(selectedCandidate.skill_scores || {}).map(
+
+                  ([skill, value]) => (
+
+                    <div key={skill} style={{ marginBottom: "18px" }}>
+
+                      <p>
+
+                        {skill} : {value}%
+
+                      </p>
+
+                      <div className="progress">
+
+                        <div
+                          className="progress-fill"
+                          style={{
+                            width: `${value}%`,
+                          }}
+                        ></div>
+
+                      </div>
+
+                    </div>
+
+                  )
+
+                )}
+
+              </div>
 
             </div>
 

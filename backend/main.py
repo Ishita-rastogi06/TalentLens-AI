@@ -90,21 +90,26 @@ async def _read_resume(file: UploadFile) -> Dict[str, str]:
 def _call_groq(prompt: str) -> Dict[str, Any]:
     if client is None:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY is not configured.")
-    response = client.chat.completions.create(
-        model=DEFAULT_MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a senior technical recruiter with 15 years of experience.\n"
-                    "Return ONLY valid JSON. No markdown. No code fences. No prose before or after."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.3,
-    )
-    return _parse_ai_response(response.choices[0].message.content)
+    try:
+        response = client.chat.completions.create(
+            model=DEFAULT_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a senior technical recruiter with 15 years of experience.\n"
+                        "Return ONLY valid JSON. No markdown. No code fences. No prose before or after."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            timeout=60,
+        )
+        return _parse_ai_response(response.choices[0].message.content)
+    except Exception as exc:
+        logger.exception("Groq API call failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Groq API error: {str(exc)}") from exc
 
 
 def _build_analysis_prompt(resume_text: str, jd_text: str, ats: dict) -> str:
@@ -192,22 +197,73 @@ RULES:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "ok",
+        "groq_configured": client is not None,
+        "model": DEFAULT_MODEL,
+    }
+
+
 @app.post("/analyze")
 async def analyze_resume(
     resume: List[UploadFile] = File(...),
     job_description: str = Form(...),
 ):
-    resumes = [await _read_resume(f) for f in resume]
+    try:
+        resumes = [await _read_resume(f) for f in resume]
 
-    # ── Multi-resume ranking ──────────────────────────────────────────
-    if len(resumes) > 1:
-        results = []
-        for rd in resumes:
-            ats = calculate_score(rd["text"], job_description)
-            ai = _call_groq(_build_analysis_prompt(rd["text"], job_description, ats))
-            results.append({
-                "name":                  rd["name"],
-                "resume_name":           rd["resume_name"],
+        # ── Multi-resume ranking ──────────────────────────────────────────
+        if len(resumes) > 1:
+            results = []
+            for rd in resumes:
+                try:
+                    ats = calculate_score(rd["text"], job_description)
+                    ai = _call_groq(_build_analysis_prompt(rd["text"], job_description, ats))
+                    results.append({
+                        "name":                  rd["name"],
+                        "resume_name":           rd["resume_name"],
+                        "score":                 ats["score"],
+                        "confidence":            ats["confidence"],
+                        "verdict":               ats["verdict"],
+                        "matched_skills":        ats["matched_skills"],
+                        "missing_skills":        ats["missing_skills"],
+                        "skill_scores":          ats["skill_scores"],
+                        "score_breakdown":       ats["score_breakdown"],
+                        "resume_features":       ats["resume_features"],
+                        "semantic_similarity":   ats["semantic_similarity"],
+                        "score_components":      ats["score_components"],
+                        "requirement_coverage":  ats["requirement_coverage"],
+                        "parsed_jd":             ats["parsed_jd"],
+                        "strengths":             ai.get("strengths", []),
+                        "weaknesses":            ai.get("weaknesses", []),
+                        "improvements":          ai.get("improvements", []),
+                        "resume_summary":        ai.get("resume_summary", ""),
+                        "reasoning":             ai.get("reasoning", ""),
+                        "email":                 extract_email(rd["text"]),
+                        "phone":                 extract_phone(rd["text"]),
+                        "resume_text":           rd["text"],
+                    })
+                except Exception as exc:
+                    logger.exception("Error analyzing resume %s: %s", rd["name"], exc)
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Error analyzing {rd['name']}: {str(exc)}"
+                    ) from exc
+
+            results.sort(key=lambda x: x["score"], reverse=True)
+            for i, r in enumerate(results):
+                r["rank"] = i + 1
+            return {"ranking": results}
+
+        # ── Single resume (student) ───────────────────────────────────────
+        resume_text = resumes[0]["text"]
+        ats = calculate_score(resume_text, job_description)
+        ai = _call_groq(_build_analysis_prompt(resume_text, job_description, ats))
+
+        return {
+            "analysis": {
                 "score":                 ats["score"],
                 "confidence":            ats["confidence"],
                 "verdict":               ats["verdict"],
@@ -225,43 +281,14 @@ async def analyze_resume(
                 "improvements":          ai.get("improvements", []),
                 "resume_summary":        ai.get("resume_summary", ""),
                 "reasoning":             ai.get("reasoning", ""),
-                "email":                 extract_email(rd["text"]),
-                "phone":                 extract_phone(rd["text"]),
-                "resume_text":           rd["text"],
-            })
-
-        results.sort(key=lambda x: x["score"], reverse=True)
-        for i, r in enumerate(results):
-            r["rank"] = i + 1
-        return {"ranking": results}
-
-    # ── Single resume (student) ───────────────────────────────────────
-    resume_text = resumes[0]["text"]
-    ats = calculate_score(resume_text, job_description)
-    ai = _call_groq(_build_analysis_prompt(resume_text, job_description, ats))
-
-    return {
-        "analysis": {
-            "score":                 ats["score"],
-            "confidence":            ats["confidence"],
-            "verdict":               ats["verdict"],
-            "matched_skills":        ats["matched_skills"],
-            "missing_skills":        ats["missing_skills"],
-            "skill_scores":          ats["skill_scores"],
-            "score_breakdown":       ats["score_breakdown"],
-            "resume_features":       ats["resume_features"],
-            "semantic_similarity":   ats["semantic_similarity"],
-            "score_components":      ats["score_components"],
-            "requirement_coverage":  ats["requirement_coverage"],
-            "parsed_jd":             ats["parsed_jd"],
-            "strengths":             ai.get("strengths", []),
-            "weaknesses":            ai.get("weaknesses", []),
-            "improvements":          ai.get("improvements", []),
-            "resume_summary":        ai.get("resume_summary", ""),
-            "reasoning":             ai.get("reasoning", ""),
-            "resume_text":           resume_text,
+                "resume_text":           resume_text,
+            }
         }
-    }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Unexpected error in analyze: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(exc)}") from exc
 
 
 @app.post("/chat")
