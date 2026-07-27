@@ -304,6 +304,37 @@ export default function Landing() {
               <span>Screen candidates</span>
             </button>
           </div>
+
+          <p className="cta-tagline">"Great careers start with great first impressions"</p>
+        </div>
+      </section>
+
+      {/* TRUST BADGES */}
+      <section className="trust-section">
+        <div className="trust-content">
+          <div className="trust-badge">
+            <span className="trust-icon">✓</span>
+            <div className="trust-text">
+              <strong>10,000+</strong>
+              <p>Resumes Optimized</p>
+            </div>
+          </div>
+          <div className="trust-divider"></div>
+          <div className="trust-badge">
+            <span className="trust-icon">✓</span>
+            <div className="trust-text">
+              <strong>500+</strong>
+              <p>Companies Using</p>
+            </div>
+          </div>
+          <div className="trust-divider"></div>
+          <div className="trust-badge">
+            <span className="trust-icon">✓</span>
+            <div className="trust-text">
+              <strong>95%</strong>
+              <p>User Satisfaction</p>
+            </div>
+          </div>
         </div>
       </section>
     </div>
