@@ -143,9 +143,9 @@ npm install
 npm run dev
 ```
 
-Frontend runs at `http://localhost:5173`
+Frontend runs at `http://localhost:5174`
 
-Open `http://localhost:5173` in your browser. Both terminals must stay running.
+Open `http://localhost:5174` in your browser. Both terminals must stay running.
 
 ---
 
