@@ -119,6 +119,58 @@ def _compute_skill_component(
     return component_score, matched, missing, skill_scores, breakdown
 
 
+def _compute_skill_component_with_cached_jd(
+    resume_text: str,
+    jd_skills: list[str],
+    sem_matches: dict[str, str],
+    jd_text: str,
+) -> tuple[float, list[str], list[str], dict[str, float], list[dict]]:
+    """
+    Same as _compute_skill_component but uses pre-extracted JD skills (for multi-resume batches)
+    to avoid redundant Groq API calls.
+    """
+    resume_skills = extract_skills(resume_text)
+    sections = split_sections(jd_text)
+    weights = build_skill_weights(jd_skills, sections)
+
+    matched: list[str] = []
+    missing: list[str] = []
+    breakdown: list[dict] = []
+    skill_scores: dict[str, float] = {}
+
+    earned = 0.0
+    total = sum(weights.get(s, 0.3) for s in jd_skills)
+
+    for skill in jd_skills:
+        w = weights.get(skill, 0.3)
+
+        if skill in resume_skills:
+            matched.append(skill)
+            earned += w
+            skill_scores[skill] = 100
+            breakdown.append({"skill": skill, "status": "Exact Match", "points": f"+{round(w,2)}"})
+
+        elif skill in sem_matches:
+            matched.append(skill)
+            earned += w * 0.82
+            skill_scores[skill] = 82
+            breakdown.append({
+                "skill": skill,
+                "status": f"Semantic Match → {sem_matches[skill]}",
+                "points": f"+{round(w * 0.82, 2)}",
+            })
+
+        else:
+            missing.append(skill)
+            skill_scores[skill] = 0
+            breakdown.append({"skill": skill, "status": "Missing", "points": f"-{round(w,2)}"})
+
+    ratio = earned / max(total, 0.001)
+    component_score = ratio * 35.0
+
+    return component_score, matched, missing, skill_scores, breakdown
+
+
 # ── Requirement coverage component (30 pts) ───────────────────────────────────
 
 def _compute_requirement_component(
@@ -207,7 +259,7 @@ def _compute_profile_component(features: dict, section_sim: dict) -> float:
 
 # ── Master scoring function ────────────────────────────────────────────────────
 
-def calculate_score(resume_text: str, jd_text: str) -> dict:
+def calculate_score(resume_text: str, jd_text: str, cached_jd_skills: list[str] | None = None, cached_parsed_jd: dict | None = None) -> dict:
     """
     Full ATS scoring pipeline.
 
@@ -217,10 +269,19 @@ def calculate_score(resume_text: str, jd_text: str) -> dict:
       resume_features, semantic_similarity, score_components,
       requirement_coverage (passage-level detail),
       parsed_jd (structured JD metadata)
+    
+    Args:
+        resume_text: resume content
+        jd_text: job description
+        cached_jd_skills: if provided, skip JD skill extraction (for multi-resume batches)
+        cached_parsed_jd: if provided, skip JD parsing (for multi-resume batches)
     """
 
     # ── Parse JD into structured requirements ──────────────────────
-    parsed_jd = parse_jd(jd_text)
+    if cached_parsed_jd:
+        parsed_jd = cached_parsed_jd
+    else:
+        parsed_jd = parse_jd(jd_text)
 
     # ── Extract features & embeddings ──────────────────────────────
     features = extract_resume_features(resume_text)
@@ -228,9 +289,14 @@ def calculate_score(resume_text: str, jd_text: str) -> dict:
     section_sim = compute_section_similarity(resume_text, jd_text)
 
     # ── Component 1: Skill coverage (35 pts) ───────────────────────
-    skill_score, matched_skills, missing_skills, skill_scores, skill_breakdown = (
-        _compute_skill_component(resume_text, jd_text, sem_matches)
-    )
+    if cached_jd_skills:
+        skill_score, matched_skills, missing_skills, skill_scores, skill_breakdown = (
+            _compute_skill_component_with_cached_jd(resume_text, cached_jd_skills, sem_matches, jd_text)
+        )
+    else:
+        skill_score, matched_skills, missing_skills, skill_scores, skill_breakdown = (
+            _compute_skill_component(resume_text, jd_text, sem_matches)
+        )
 
     # ── Component 2: Requirement coverage (30 pts) ─────────────────
     req_score, covered_requirements = _compute_requirement_component(resume_text, parsed_jd)
@@ -257,7 +323,8 @@ def calculate_score(resume_text: str, jd_text: str) -> dict:
     else:
         verdict = "🔴 Poor Match"
 
-    confidence = round(len(matched_skills) / max(len(extract_skills(jd_text, use_groq=True)), 1) * 100)
+    jd_skills_count = len(cached_jd_skills) if cached_jd_skills else len(extract_skills(jd_text, use_groq=True))
+    confidence = round(len(matched_skills) / max(jd_skills_count, 1) * 100)
 
     # Requirement coverage summary for the UI
     req_coverage_summary = [

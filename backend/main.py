@@ -17,6 +17,8 @@ from groq import Groq
 from pydantic import BaseModel
 
 from scorer import calculate_score
+from jd_parser import parse_jd
+from skill_extractor import extract_skills
 from utils import extract_email, extract_name, extract_phone
 
 load_dotenv()
@@ -216,10 +218,22 @@ async def analyze_resume(
 
         # ── Multi-resume ranking ──────────────────────────────────────────
         if len(resumes) > 1:
+            # Cache JD parsing and skill extraction to avoid redundant API calls
+            logger.info(f"Analyzing {len(resumes)} resumes. Caching JD data...")
+            cached_parsed_jd = parse_jd(job_description)
+            # Use regex-only skills (no Groq) to save time
+            cached_jd_skills = extract_skills(job_description, use_groq=False)
+            
             results = []
-            for rd in resumes:
+            for idx, rd in enumerate(resumes):
                 try:
-                    ats = calculate_score(rd["text"], job_description)
+                    logger.info(f"  Resume {idx+1}/{len(resumes)}: {rd['name']}")
+                    ats = calculate_score(
+                        rd["text"], 
+                        job_description,
+                        cached_jd_skills=cached_jd_skills,
+                        cached_parsed_jd=cached_parsed_jd
+                    )
                     ai = _call_groq(_build_analysis_prompt(rd["text"], job_description, ats))
                     results.append({
                         "name":                  rd["name"],
@@ -255,9 +269,11 @@ async def analyze_resume(
             results.sort(key=lambda x: x["score"], reverse=True)
             for i, r in enumerate(results):
                 r["rank"] = i + 1
+            logger.info(f"Successfully analyzed {len(resumes)} resumes")
             return {"ranking": results}
 
         # ── Single resume (student) ───────────────────────────────────────
+        logger.info("Analyzing single resume (student mode)")
         resume_text = resumes[0]["text"]
         ats = calculate_score(resume_text, job_description)
         ai = _call_groq(_build_analysis_prompt(resume_text, job_description, ats))

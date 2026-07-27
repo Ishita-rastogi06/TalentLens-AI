@@ -652,7 +652,7 @@ pdf.text(`Verdict: ${verdict}`, 14, 69);
 
         {activeTab === "insights" && (
   <div className="insights-view">
-    <h1>Recruitment Analytics Dashboard</h1>
+    <h1 style={{ textAlign: "center" }}>Recruitment Analytics Dashboard</h1>
 
     <div className="analytics-summary" style={{ marginBottom: "25px" }}>
       <div className="result-card small-card" style={{ marginBottom: "20px" }}>
