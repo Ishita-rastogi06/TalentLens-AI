@@ -10,6 +10,8 @@ body{
   background:#e6c8b7;
   color:#5B6E74;
   overflow-x: hidden;
+  margin: 0;
+  padding: 0;
 }
 
 /* Force-remove any accidental right-edge borders or outlines */
