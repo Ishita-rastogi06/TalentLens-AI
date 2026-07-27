@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import fitz
@@ -21,7 +22,9 @@ from jd_parser import parse_jd
 from skill_extractor import extract_skills
 from utils import extract_email, extract_name, extract_phone
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
+load_dotenv(BASE_DIR.parent / ".env")
 
 logger = logging.getLogger(__name__)
 
