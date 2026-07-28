@@ -99,7 +99,7 @@ export default function Landing() {
           <div className="stat-label">Score Components</div>
         </div>
         <div className="stat-card">
-          <div className="stat-number">1min</div>
+          <div className="stat-number">15sec</div>
           <div className="stat-label">Time to Analyze</div>
         </div>
         <div className="stat-card">
@@ -119,7 +119,7 @@ export default function Landing() {
           <div className="stat-label">Score Components</div>
         </div>
         <div className="stat-card">
-          <div className="stat-number">1min</div>
+          <div className="stat-number">15sec</div>
           <div className="stat-label">Time to Analyze</div>
         </div>
         <div className="stat-card">
