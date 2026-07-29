@@ -10,9 +10,7 @@ export default function Landing() {
       {/* HERO SECTION */}
       <section className="hero-pro">
         <div className="hero-content">
-          <div className="hero-badge">
-            <span>✨ AI-Powered Resume Screening</span>
-          </div>
+          
           
           <h1 className="hero-title-pro">
             Your AI Resume<br />
@@ -99,7 +97,7 @@ export default function Landing() {
           <div className="stat-label">Score Components</div>
         </div>
         <div className="stat-card">
-          <div className="stat-number">15sec</div>
+          <div className="stat-number">30sec</div>
           <div className="stat-label">Time to Analyze</div>
         </div>
         <div className="stat-card">
@@ -108,25 +106,7 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* STATS SECTION - MOVED TO AFTER CTA */}
-      <section className="stats-section" style={{ display: 'none' }}>
-        <div className="stat-card">
-          <div className="stat-number">50K+</div>
-          <div className="stat-label">Resumes Analyzed</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-number">4</div>
-          <div className="stat-label">Score Components</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-number">15sec</div>
-          <div className="stat-label">Time to Analyze</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-number">99%</div>
-          <div className="stat-label">Accuracy Rate</div>
-        </div>
-      </section>
+      
 
       {/* HOW IT WORKS */}
       <section className="how-it-works">
