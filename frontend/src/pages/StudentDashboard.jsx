@@ -1,20 +1,9 @@
 import Sidebar from "../components/Sidebar";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import Chatbot from "../components/Chatbot";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell
-} from "recharts";
-
+import InsightsView from "../components/InsightsView";
 
 function AnalysisScoreCard({ result }) {
   const count = (items) => (Array.isArray(items) ? items.length : 0);
@@ -91,28 +80,11 @@ export default function StudentDashboard() {
   const [result, setResult] = useState(null);
 
   const [activeTab, setActiveTab] = useState("dashboard");
+
   useEffect(() => {
-  window.scrollTo({
-    top: 0,
-    left: 0,
-    behavior: "smooth",
-  });
-
-  document.querySelector(".main-area")?.scrollTo({
-    top: 0,
-    left: 0,
-    behavior: "smooth",
-  });
-}, [activeTab]);
-  const insightsCarouselRef = useRef(null);
-
-  const scrollInsights = (direction) => {
-    insightsCarouselRef.current?.scrollBy({
-      left: direction * insightsCarouselRef.current.clientWidth * 0.72,
-      behavior: "smooth",
-    });
-  };
-
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    document.querySelector(".main-area")?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [activeTab]);
   const getInsightText = (item, preferredKey) => {
     if (!item) return "";
     if (typeof item !== "object") return String(item);
@@ -317,25 +289,7 @@ export default function StudentDashboard() {
   doc.save("TalentLens_Report.pdf");
 };
 
-const skillData = Object.entries(result?.skill_scores || {}).map(
-  ([skill, value]) => ({
-    skill,
-    score: value,
-  })
-);
 
-const pieData = [
-  {
-    name: "Matched",
-    value: result?.matched_skills?.length || 0,
-  },
-  {
-    name: "Missing",
-    value: result?.missing_skills?.length || 0,
-  },
-];
-
-const COLORS = ["#c3955b", "#7b3048"];
 
   return (
 
@@ -582,273 +536,7 @@ const COLORS = ["#c3955b", "#7b3048"];
 )}
 
 {activeTab === "insights" && result && (
-
-  <div className="insights-view">
-
-  <h1 className="centered-title">Resume Insights</h1>
-    <div className="insights-stats">
-      <div className="stat-box ats-stat">
-        <h2>{result.score}%</h2>
-        <p>ATS Score</p>
-      </div>
-
-      <div className="stats-row">
-        <div className="stat-box">
-          <h2>{result.matched_skills?.length || 0}</h2>
-          <p>Matched Skills</p>
-        </div>
-
-        <div className="stat-box">
-          <h2>{result.missing_skills?.length || 0}</h2>
-          <p>Missing Skills</p>
-        </div>
-
-        <div className="stat-box">
-          <h2>{result.strengths?.length || 0}</h2>
-          <p>Strengths</p>
-        </div>
-      </div>
-    </div>
-
-    <div className="insights-carousel-shell">
-      <button
-        className="insights-arrow insights-arrow-left"
-        onClick={() => scrollInsights(-1)}
-        type="button"
-        aria-label="Previous insight"
-      >
-        ‹
-      </button>
-
-      <div className="insights-carousel" ref={insightsCarouselRef}>
-
-      <div className="result-card">
-
-        <h3>🎯 ATS Readiness</h3>
-
-        <h1>{result.score}%</h1>
-
-        <div className="progress">
-
-          <div
-            className="progress-fill"
-            style={{ width: `${result.score}%` }}
-          ></div>
-
-        </div>
-
-      </div>
-      <div className="result-card insight-center-card">
-
-        <h3>💼 Hiring Probability</h3>
-
-        <h1>
-
-          {result.score >= 80
-            ? "High"
-            : result.score >= 60
-            ? "Medium"
-            : "Low"}
-
-        </h1>
-
-      </div>
-
-      <div className="result-card">
-
-        <h3>📊 Skill Scores</h3>
-
-        <div style={{ width: "100%", height: 300 }}>
-
-          <ResponsiveContainer>
-
-            <BarChart
-              data={skillData}
-              layout="vertical"
-              margin={{ top: 8, right: 24, bottom: 8, left: 20 }}
-            >
-
-              <XAxis type="number" domain={[0, 100]} />
-
-              <YAxis
-                dataKey="skill"
-                type="category"
-                width={110}
-                interval={0}
-              />
-
-              <Tooltip />
-
-              <Bar dataKey="score" fill="#7b3048" radius={[0, 8, 8, 0]} barSize={22} />
-
-            </BarChart>
-
-          </ResponsiveContainer>
-
-        </div>
-
-      </div>
-      <div className="result-card">
-
-        <h3>🥧 Skill Match</h3>
-
-        <div style={{ width: "100%", height: 300 }}>
-
-          <ResponsiveContainer>
-
-            <PieChart>
-
-              <Pie
-
-                data={pieData}
-
-                dataKey="value"
-
-                outerRadius={90}
-
-              >
-
-                {
-
-                  pieData.map((entry, index) => (
-
-                    <Cell
-                      key={index}
-                      fill={COLORS[index]}
-                    />
-
-                  ))
-
-                }
-
-              </Pie>
-
-              <Tooltip />
-
-            </PieChart>
-
-          </ResponsiveContainer>
-
-        </div>
-
-      </div>
-
-  <div className="result-card">
-
-    <h3>🧠 AI Observations</h3>
-
-    <ul>
-      <li>ATS Match : {result.score}%</li>
-      <li>Matched Skills : {result.matched_skills?.length || 0}</li>
-      <li>Missing Skills : {result.missing_skills?.length || 0}</li>
-      <li>Strengths : {result.strengths?.length || 0}</li>
-      <li>Weaknesses : {result.weaknesses?.length || 0}</li>
-    </ul>
-
-  </div>
-  <div className="result-card">
-
-    <h3>🎯 Career Recommendation</h3>
-
-    <h2>
-      {
-        result.score >= 85
-          ? "Senior Software Engineer"
-          : result.score >= 70
-          ? "Software Developer"
-          : result.score >= 55
-          ? "Junior Developer"
-          : "Intern / Fresher Role"
-      }
-    </h2>
-
-    <p style={{ marginTop: "15px" }}>
-      {
-        result.score >= 85
-          ? "Your resume is highly competitive for experienced technical roles."
-          : result.score >= 70
-          ? "You are ready for most software developer positions."
-          : result.score >= 55
-          ? "Improve missing skills before applying to higher roles."
-          : "Build projects and strengthen your resume before applying."
-      }
-    </p>
-
-  </div>
-  <div className="result-card">
-
-    <h3>🏥 Resume Health</h3>
-
-    <div className="progress">
-
-      <div
-        className="progress-fill"
-        style={{ width: `${result.score}%` }}
-      ></div>
-      
-
-<hr style={{ margin: "20px 0", opacity: 0.3 }} />
-
-<h4>🎯 Recommended Next Skills</h4>
-
-<ul>
-  {(result.missing_skills || []).slice(0, 5).map((skill, i) => (
-    <li key={i}>{skill}</li>
-  ))}
-</ul>
-    </div>
-
-    <br />
-
-    <h2>
-
-      {result.score >= 80
-        ? "🟢 Excellent"
-        : result.score >= 60
-        ? "🟡 Good"
-        : "🔴 Needs Improvement"}
-
-    </h2>
-
-  </div>
-
-      </div>
-
-      <button
-        className="insights-arrow insights-arrow-right"
-        onClick={() => scrollInsights(1)}
-        type="button"
-        aria-label="Next insight"
-      >
-        ›
-      </button>
-    </div>
-
-    <div className="result-card insights-skill-breakdown">
-      <h3>Skill Scores</h3>
-
-      <div className="insights-skill-chart">
-        <ResponsiveContainer>
-          <BarChart
-            data={skillData}
-            layout="vertical"
-            margin={{ top: 8, right: 32, bottom: 8, left: 24 }}
-          >
-            <XAxis type="number" domain={[0, 100]} />
-            <YAxis
-              dataKey="skill"
-              type="category"
-              width={150}
-              interval={0}
-            />
-            <Tooltip />
-            <Bar dataKey="score" fill="#7b3048" radius={[0, 10, 10, 0]} barSize={24} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
-  </div>
-
+  <InsightsView result={result} />
 )}
 
         {activeTab === "chatbot" && (

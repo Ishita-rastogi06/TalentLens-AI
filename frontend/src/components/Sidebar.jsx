@@ -15,10 +15,10 @@ export default function Sidebar({
   const studentTabs = [
 
     "dashboard",
+    
+    "analysis",
 
     "insights",
-
-    "analysis",
 
     "chatbot",
 
