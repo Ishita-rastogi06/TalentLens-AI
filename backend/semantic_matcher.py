@@ -215,7 +215,11 @@ def compute_section_similarity(resume_text: str, jd_text: str) -> dict:
     }
 
 
-def semantic_match(resume_text: str, jd_text: str) -> dict:
+def semantic_match(
+    resume_text: str,
+    jd_text: str,
+    cached_jd_skills: list[str] | None = None,
+) -> dict:
     """
     Skill-token level matching (legacy interface, used for Matched/Missing UI).
 
@@ -224,7 +228,9 @@ def semantic_match(resume_text: str, jd_text: str) -> dict:
     from skill_extractor import extract_skills
 
     resume_skills = extract_skills(resume_text)
-    jd_skills = extract_skills(jd_text, use_groq=True)
+    # Multi-resume analysis supplies one pre-extracted JD skill list. Reusing
+    # it avoids repeating the same remote extraction for every resume.
+    jd_skills = cached_jd_skills if cached_jd_skills else extract_skills(jd_text, use_groq=True)
 
     if not resume_skills or not jd_skills:
         return {}

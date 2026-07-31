@@ -4,9 +4,13 @@ TalentLens AI — FastAPI backend
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import re
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -29,6 +33,12 @@ load_dotenv(BASE_DIR.parent / ".env")
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+# CPU resume scoring can run in parallel. Groq calls themselves are deliberately
+# serialized below because this account has a 6,000 tokens-per-minute limit.
+MAX_CONCURRENT_ANALYSES = max(1, min(int(os.getenv("MAX_CONCURRENT_ANALYSES", "2")), 4))
+GROQ_MAX_TOKENS = max(250, min(int(os.getenv("GROQ_MAX_TOKENS", "500")), 800))
+GROQ_MAX_RETRIES = max(1, min(int(os.getenv("GROQ_MAX_RETRIES", "6")), 10))
+_groq_request_lock = threading.Lock()
 CORS_ORIGINS = [
     o.strip()
     for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
@@ -92,30 +102,55 @@ async def _read_resume(file: UploadFile) -> Dict[str, str]:
     return {"resume_name": file.filename, "name": name, "text": text}
 
 
+def _retry_delay_seconds(error: Exception, attempt: int) -> float:
+    """Use Groq's suggested wait when available, with a small safe backoff."""
+    match = re.search(r"try again in\s+(\d+)\s*(ms|s)", str(error), re.IGNORECASE)
+    if match:
+        suggested = float(match.group(1)) / (1000 if match.group(2).lower() == "ms" else 1)
+        return max(0.75, suggested + 0.25)
+    return min(8.0, 0.75 * (2 ** attempt))
+
+
 def _call_groq(prompt: str) -> Dict[str, Any]:
     if client is None:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY is not configured.")
-    try:
-        response = client.chat.completions.create(
-            model=DEFAULT_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a senior technical recruiter with 15 years of experience.\n"
-                        "Return ONLY valid JSON. No markdown. No code fences. No prose before or after."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.3,
-            timeout=60,
-        )
-        return _parse_ai_response(response.choices[0].message.content)
-    except Exception as exc:
-        logger.exception("Groq API call failed: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Groq API error: {str(exc)}") from exc
 
+    # Candidate scoring may run in worker threads, but only one request may use
+    # Groq at once. This prevents concurrent requests from exceeding the TPM cap.
+    with _groq_request_lock:
+        for attempt in range(GROQ_MAX_RETRIES):
+            try:
+                response = client.chat.completions.create(
+                    model=DEFAULT_MODEL,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a senior technical recruiter with 15 years of experience.\n"
+                                "Return ONLY valid JSON. No markdown. No code fences. No prose before or after."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.3,
+                    max_tokens=GROQ_MAX_TOKENS,
+                    timeout=60,
+                )
+                return _parse_ai_response(response.choices[0].message.content)
+            except Exception as exc:
+                is_rate_limit = "rate_limit" in str(exc).lower() or "429" in str(exc)
+                if is_rate_limit and attempt < GROQ_MAX_RETRIES - 1:
+                    wait_seconds = _retry_delay_seconds(exc, attempt)
+                    logger.warning(
+                        "Groq rate limit reached; retrying in %.2f seconds (%s/%s).",
+                        wait_seconds, attempt + 1, GROQ_MAX_RETRIES,
+                    )
+                    time.sleep(wait_seconds)
+                    continue
+                logger.exception("Groq API call failed: %s", exc)
+                raise HTTPException(status_code=502, detail=f"Groq API error: {str(exc)}") from exc
+
+    raise HTTPException(status_code=502, detail="Groq API retry limit reached.")
 
 def _build_analysis_prompt(resume_text: str, jd_text: str, ats: dict) -> str:
     components = ats.get("score_components", {})
@@ -166,10 +201,10 @@ RESUME FEATURES:
 {json.dumps(ats.get("resume_features", {}), indent=2)}
 
 FULL RESUME:
-{resume_text[:3500]}
+{resume_text[:2600]}
 
 JOB DESCRIPTION:
-{jd_text[:2000]}
+{jd_text[:1400]}
 
 ════════════════════════════════
 Return ONLY this JSON — no extra text:
@@ -200,6 +235,51 @@ RULES:
 """
 
 
+def _build_ranking_result(rd: Dict[str, str], ats: dict, ai: dict) -> Dict[str, Any]:
+    """Build the existing recruiter response item without changing its schema."""
+    return {
+        "name":                  rd["name"],
+        "resume_name":           rd["resume_name"],
+        "score":                 ats["score"],
+        "confidence":            ats["confidence"],
+        "verdict":               ats["verdict"],
+        "matched_skills":        ats["matched_skills"],
+        "missing_skills":        ats["missing_skills"],
+        "skill_scores":          ats["skill_scores"],
+        "score_breakdown":       ats["score_breakdown"],
+        "resume_features":       ats["resume_features"],
+        "semantic_similarity":   ats["semantic_similarity"],
+        "score_components":      ats["score_components"],
+        "requirement_coverage":  ats["requirement_coverage"],
+        "parsed_jd":             ats["parsed_jd"],
+        "strengths":             ai.get("strengths", []),
+        "weaknesses":            ai.get("weaknesses", []),
+        "improvements":          ai.get("improvements", []),
+        "resume_summary":        ai.get("resume_summary", ""),
+        "reasoning":             ai.get("reasoning", ""),
+        "email":                 extract_email(rd["text"]),
+        "phone":                 extract_phone(rd["text"]),
+        "resume_text":           rd["text"],
+    }
+
+
+def _analyze_ranking_candidate(
+    rd: Dict[str, str],
+    job_description: str,
+    cached_jd_skills: list[str],
+    cached_parsed_jd: dict,
+) -> Dict[str, Any]:
+    """Run one candidate's CPU scoring and Groq analysis outside the event loop."""
+    ats = calculate_score(
+        rd["text"],
+        job_description,
+        cached_jd_skills=cached_jd_skills,
+        cached_parsed_jd=cached_parsed_jd,
+    )
+    ai = _call_groq(_build_analysis_prompt(rd["text"], job_description, ats))
+    return _build_ranking_result(rd, ats, ai)
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -217,57 +297,45 @@ async def analyze_resume(
     job_description: str = Form(...),
 ):
     try:
-        resumes = [await _read_resume(f) for f in resume]
+        # Read PDFs concurrently; this does not change extracted text or response data.
+        resumes = await asyncio.gather(*(_read_resume(f) for f in resume))
 
         # ── Multi-resume ranking ──────────────────────────────────────────
         if len(resumes) > 1:
-            # Cache JD parsing and skill extraction to avoid redundant API calls
-            logger.info(f"Analyzing {len(resumes)} resumes. Caching JD data...")
-            cached_parsed_jd = parse_jd(job_description)
-            # Use regex-only skills (no Groq) to save time
-            cached_jd_skills = extract_skills(job_description, use_groq=False)
-            
-            results = []
-            for idx, rd in enumerate(resumes):
-                try:
-                    logger.info(f"  Resume {idx+1}/{len(resumes)}: {rd['name']}")
-                    ats = calculate_score(
-                        rd["text"], 
-                        job_description,
-                        cached_jd_skills=cached_jd_skills,
-                        cached_parsed_jd=cached_parsed_jd
-                    )
-                    ai = _call_groq(_build_analysis_prompt(rd["text"], job_description, ats))
-                    results.append({
-                        "name":                  rd["name"],
-                        "resume_name":           rd["resume_name"],
-                        "score":                 ats["score"],
-                        "confidence":            ats["confidence"],
-                        "verdict":               ats["verdict"],
-                        "matched_skills":        ats["matched_skills"],
-                        "missing_skills":        ats["missing_skills"],
-                        "skill_scores":          ats["skill_scores"],
-                        "score_breakdown":       ats["score_breakdown"],
-                        "resume_features":       ats["resume_features"],
-                        "semantic_similarity":   ats["semantic_similarity"],
-                        "score_components":      ats["score_components"],
-                        "requirement_coverage":  ats["requirement_coverage"],
-                        "parsed_jd":             ats["parsed_jd"],
-                        "strengths":             ai.get("strengths", []),
-                        "weaknesses":            ai.get("weaknesses", []),
-                        "improvements":          ai.get("improvements", []),
-                        "resume_summary":        ai.get("resume_summary", ""),
-                        "reasoning":             ai.get("reasoning", ""),
-                        "email":                 extract_email(rd["text"]),
-                        "phone":                 extract_phone(rd["text"]),
-                        "resume_text":           rd["text"],
-                    })
-                except Exception as exc:
-                    logger.exception("Error analyzing resume %s: %s", rd["name"], exc)
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Error analyzing {rd['name']}: {str(exc)}"
-                    ) from exc
+            logger.info(
+                "Analyzing %s resumes with %s concurrent workers. Caching JD data...",
+                len(resumes),
+                MAX_CONCURRENT_ANALYSES,
+            )
+            cached_parsed_jd = await asyncio.to_thread(parse_jd, job_description)
+            cached_jd_skills = await asyncio.to_thread(
+                extract_skills, job_description, use_groq=False
+            )
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT_ANALYSES)
+
+            async def analyze_one(idx: int, rd: Dict[str, str]) -> Dict[str, Any]:
+                async with semaphore:
+                    try:
+                        logger.info("  Resume %s/%s: %s", idx + 1, len(resumes), rd["name"])
+                        return await asyncio.to_thread(
+                            _analyze_ranking_candidate,
+                            rd,
+                            job_description,
+                            cached_jd_skills,
+                            cached_parsed_jd,
+                        )
+                    except Exception as exc:
+                        logger.exception("Error analyzing resume %s: %s", rd["name"], exc)
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Error analyzing {rd['name']}: {str(exc)}",
+                        ) from exc
+
+            # gather preserves input order; the existing stable score sort therefore
+            # keeps tie-ranking behavior unchanged.
+            results = await asyncio.gather(
+                *(analyze_one(idx, rd) for idx, rd in enumerate(resumes))
+            )
 
             results.sort(key=lambda x: x["score"], reverse=True)
             for i, r in enumerate(results):

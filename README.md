@@ -118,6 +118,7 @@ venv\Scripts\activate        # Windows
 # source venv/bin/activate   # macOS / Linux
 
 pip install fastapi uvicorn python-multipart python-dotenv groq pymupdf sentence-transformers torch
+
 ```
 
 Create `backend/.env` (copy from `.env.example`):

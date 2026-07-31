@@ -259,7 +259,12 @@ def _compute_profile_component(features: dict, section_sim: dict) -> float:
 
 # ── Master scoring function ────────────────────────────────────────────────────
 
-def calculate_score(resume_text: str, jd_text: str, cached_jd_skills: list[str] | None = None, cached_parsed_jd: dict | None = None) -> dict:
+def calculate_score(
+    resume_text: str,
+    jd_text: str,
+    cached_jd_skills: list[str] | None = None,
+    cached_parsed_jd: dict | None = None,
+) -> dict:
     """
     Full ATS scoring pipeline.
 
@@ -285,7 +290,14 @@ def calculate_score(resume_text: str, jd_text: str, cached_jd_skills: list[str] 
 
     # ── Extract features & embeddings ──────────────────────────────
     features = extract_resume_features(resume_text)
-    sem_matches = semantic_match(resume_text, jd_text)
+    # In batch mode, reuse the already extracted JD skills. This prevents one
+    # identical Groq JD-skill request per candidate while preserving the same
+    # skill-match inputs used by the scoring component.
+    sem_matches = semantic_match(
+        resume_text,
+        jd_text,
+        cached_jd_skills=cached_jd_skills,
+    )
     section_sim = compute_section_similarity(resume_text, jd_text)
 
     # ── Component 1: Skill coverage (35 pts) ───────────────────────
