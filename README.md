@@ -131,7 +131,7 @@ CORS_ORIGINS=http://localhost:5173
 Start the server:
 ```bash
 cd backend
-uvicorn main:app --reload
+..\venv\Scripts\python.exe -m uvicorn main:app --reload
 ```
 
 Backend runs at `http://127.0.0.1:8000`

@@ -48,7 +48,7 @@ export default function Landing() {
       <section className="stats-section" aria-label="TalentLens statistics">
         <div className="stat-card"><div className="stat-number">50K+</div><div className="stat-label">Resumes Analyzed</div></div>
         <div className="stat-card"><div className="stat-number">4</div><div className="stat-label">Score Components</div></div>
-        <div className="stat-card"><div className="stat-number">30sec</div><div className="stat-label">Time to Analyze</div></div>
+        <div className="stat-card"><div className="stat-number">10sec</div><div className="stat-label">Time to Analyze</div></div>
         <div className="stat-card"><div className="stat-number">99%</div><div className="stat-label">Accuracy Rate</div></div>
       </section>
 

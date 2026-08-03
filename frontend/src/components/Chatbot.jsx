@@ -1,14 +1,92 @@
 import React, { useState, useRef, useEffect } from "react";
 import axios from "axios";
 import ReactMarkdown from "react-markdown";
+import { API_URL } from "../config/api";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const buildLocalReply = (question, analysis) => {
+  if (Array.isArray(analysis) && analysis.length) {
+    const candidates = analysis
+      .filter((item) => item && typeof item === "object")
+      .sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+
+    if (candidates.length) {
+      const top = candidates[0];
+      const runnerUp = candidates[1];
+      const name = top.name || top.resume_name || "Top candidate";
+      const matched = (top.matched_skills || []).slice(0, 5).join(", ") || "the strongest available skill overlap";
+      const missing = (top.missing_skills || []).slice(0, 4).join(", ") || "no major listed gaps";
+      const wantsComparison = /better|best|rank|compare|shortlist/i.test(question);
+
+      if (wantsComparison) {
+        return [
+          `**Best Candidate: ${name}**`,
+          `- Score: ${top.score || 0}/100`,
+          `- Verdict: ${top.verdict || "Best current match"}`,
+          `- Strongest match signals: ${matched}`,
+          `- Main gaps to verify: ${missing}`,
+          runnerUp ? `- Next closest candidate: ${runnerUp.name || runnerUp.resume_name || "Second candidate"} with ${runnerUp.score || 0}/100` : "",
+          "",
+          "I used the current analysis because the AI service did not respond in time.",
+        ].filter(Boolean).join("\n");
+      }
+
+      return `**Quick Shortlist View:** ${name} is leading with ${top.score || 0}/100. Strong match signals: ${matched}. Gaps to check: ${missing}.`;
+    }
+  }
+
+  if (analysis && typeof analysis === "object") {
+    const matched = (analysis.matched_skills || []).slice(0, 5).join(", ") || "limited direct skill overlap";
+    const missing = (analysis.missing_skills || []).slice(0, 4).join(", ") || "no major listed gaps";
+
+    return [
+      "**Resume Snapshot**",
+      `- ATS Score: ${analysis.score || 0}/100`,
+      `- Verdict: ${analysis.verdict || "Needs Review"}`,
+      `- Strong areas: ${matched}`,
+      `- Improve next: ${missing}`,
+      "",
+      "I used the current analysis because the AI service did not respond in time.",
+    ].join("\n");
+  }
+
+  return "Run an analysis first, then I can compare candidates or explain the resume score.";
+};
+
+const cleanBotText = (text) =>
+  String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/â€¢/g, "-")
+    .trim();
+
+const cannotAnswerReply = "Sorry, I cannot answer this. Please ask something related to the resume, ATS score, skills, career advice, or candidate comparison.";
+
+const isUsefulChatQuestion = (text) => {
+  const trimmed = text.trim().toLowerCase();
+  if (trimmed.length < 3) return false;
+
+  const blockedTerms = /\b(fuck|shit|bitch|nitch|asshole|bastard|chutiya|madarchod|bhenchod|bc|mc)\b/i;
+  if (blockedTerms.test(trimmed)) return false;
+
+  const letters = trimmed.match(/[a-z]/g) || [];
+  const vowels = trimmed.match(/[aeiou]/g) || [];
+  const words = trimmed.match(/[a-z0-9]+/g) || [];
+  const hasLongGibberishToken = words.some((word) => word.length >= 12 && !/[aeiou]/.test(word));
+  const hasRepeatedNoise = /(.)\1{5,}/.test(trimmed);
+  const looksMostlySymbols = letters.length / Math.max(trimmed.length, 1) < 0.35;
+  const domainQuestion = /\b(what|why|how|who|which|when|where|compare|best|better|score|skill|skills|resume|ats|candidate|candidates|improve|improvement|career|job|rank|ranking|shortlist|strength|weakness|missing|match|matched|gap|gaps|select|hire|interview)\b/.test(trimmed);
+
+  if (hasRepeatedNoise || hasLongGibberishToken || looksMostlySymbols) return false;
+  if (letters.length >= 5 && vowels.length === 0) return false;
+  return domainQuestion;
+};
 
 export default function Chatbot({ analysisResult }) {
   const [messages, setMessages] = useState([
     {
       sender: "bot",
-      text: "👋 Hi! I'm TalentLens AI. How can I help you today?",
+      text: "Hi! I'm TalentLens AI. How can I help you today?",
     },
   ]);
   const [input, setInput] = useState("");
@@ -20,38 +98,61 @@ export default function Chatbot({ analysisResult }) {
   }, [messages]);
 
   const sendMessage = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || loading) return;
 
     const question = input;
     setMessages((prev) => [...prev, { sender: "user", text: question }]);
     setInput("");
+
+    if (!isUsefulChatQuestion(question)) {
+      setMessages((prev) => [...prev, { sender: "bot", text: cannotAnswerReply }]);
+      return;
+    }
+
     setLoading(true);
 
     try {
       const res = await axios.post(`${API_URL}/chat`, {
         message: question,
         analysis: analysisResult,
+      }, {
+        timeout: 20000,
       });
+
+      if (res.status < 200 || res.status >= 300) {
+        throw new Error(res.data?.detail || `Backend request failed (${res.status})`);
+      }
+
+      const reply = res.data.reply || "I can help once an analysis is available.";
+      const cleanReply = /unable to reach groq api|groq_api_key|apiconnectionerror/i.test(reply)
+        ? buildLocalReply(question, analysisResult)
+        : reply;
 
       setMessages((prev) => [
         ...prev,
         {
           sender: "bot",
-          text: res.data.reply
-            .replace(/\r\n/g, "\n")
-            .replace(/[ \t]+\n/g, "\n")
-            .replace(/\n{3,}/g, "\n\n")
-            .replace(/•/g, "-"),
+          text: cleanBotText(cleanReply),
         },
       ]);
-    } catch {
+    } catch (error) {
+      const detail = error.response?.data?.detail || error.message || "";
+      const fallbackReply = buildLocalReply(question, analysisResult);
+
       setMessages((prev) => [
         ...prev,
-        { sender: "bot", text: "❌ Unable to connect with AI." },
+        {
+          sender: "bot",
+          text: cleanBotText(
+            /timeout|network error|failed to fetch|connect|cors|request failed/i.test(detail)
+              ? fallbackReply
+              : `${fallbackReply}\n\n_Note: ${detail || "The AI service was unavailable."}_`
+          ),
+        },
       ]);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   return (
@@ -80,7 +181,7 @@ export default function Chatbot({ analysisResult }) {
         }}
       >
         <h2 style={{ margin: 0, fontSize: 23, letterSpacing: ".1px" }}>
-          🤖 TalentLens AI Career Assistant
+          TalentLens AI Career Assistant
         </h2>
         <p style={{ margin: "8px 0 0", opacity: 0.92, fontSize: 15 }}>
           Ask anything about Resume, ATS Score or Career.
@@ -163,6 +264,7 @@ export default function Chatbot({ analysisResult }) {
         <input
           type="text"
           value={input}
+          disabled={loading}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && sendMessage()}
           placeholder="Ask anything about Resume, ATS, Career..."
@@ -180,6 +282,7 @@ export default function Chatbot({ analysisResult }) {
         <button
           onClick={sendMessage}
           disabled={loading}
+          aria-label="Send message"
           style={{
             width: 56,
             height: 56,
@@ -191,12 +294,12 @@ export default function Chatbot({ analysisResult }) {
             alignItems: "center",
             background: "linear-gradient(100deg,#7b3048,#c3955b)",
             color: "#fff",
-            cursor: "pointer",
+            cursor: loading ? "not-allowed" : "pointer",
             fontSize: 22,
             flexShrink: 0,
           }}
         >
-          {loading ? "..." : "➤"}
+          {loading ? "..." : ">"}
         </button>
       </div>
     </div>

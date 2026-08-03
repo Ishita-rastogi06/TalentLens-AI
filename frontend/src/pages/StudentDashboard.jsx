@@ -4,23 +4,24 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import Chatbot from "../components/Chatbot";
 import InsightsView from "../components/InsightsView";
+import { API_URL, readApiResponse } from "../config/api";
+import {
+  buildResumeSummary,
+  getImprovementItems,
+  getStrengthItems,
+  getWeaknessItems,
+} from "../utils/analysisSummary";
 
 function AnalysisScoreCard({ result }) {
-  const count = (items) => (Array.isArray(items) ? items.length : 0);
   const clamp = (value) => Math.min(1, Math.max(0, value));
   const score = Math.round(Number(result?.score || 0));
-  const matched = count(result?.matched_skills);
-  const missing = count(result?.missing_skills);
-  const strengths = count(result?.strengths);
-  const weaknesses = count(result?.weaknesses);
-  const skillRatio = clamp(matched / Math.max(matched + missing, 1));
-  const experienceRatio = clamp(strengths / Math.max(strengths + weaknesses, 1));
-  const profileRatio = clamp((matched + strengths) / Math.max(matched + missing + strengths + weaknesses, 1));
+  const components = result?.score_components || {};
+  const componentRatio = (key, total) => clamp(Number(components[key] || 0) / total);
   const metrics = [
-    { label: "Skill Match", ratio: skillRatio, total: 35 },
-    { label: "Requirement Coverage", ratio: skillRatio, total: 20 },
-    { label: "Experience Fit", ratio: experienceRatio, total: 20 },
-    { label: "Profile Signals", ratio: profileRatio, total: 25 },
+    { label: "Skill Match", ratio: componentRatio("skill_match", 35), total: 35 },
+    { label: "Requirement Coverage", ratio: componentRatio("requirement_coverage", 30), total: 30 },
+    { label: "Experience Fit", ratio: componentRatio("experience_fit", 20), total: 20 },
+    { label: "Profile Signals", ratio: componentRatio("profile_signals", 15), total: 15 },
   ];
   const label = score >= 75 ? "Strong Match" : score >= 50 ? "Good Match" : score >= 30 ? "Average Match" : "Needs Improvement";
 
@@ -51,6 +52,34 @@ function AnalysisScoreCard({ result }) {
 
 function AnalysisHighlightCard({ className, icon, eyebrow, title, items }) {
   const safeItems = Array.isArray(items) ? items : [];
+  const polishItem = (item) => {
+    const text = typeof item === "object" && item !== null
+      ? String(item.strength || item.weakness || item.improvement || JSON.stringify(item))
+      : String(item ?? "");
+    const lower = text.toLowerCase();
+    if (lower.includes("the candidate highlights") && lower.includes("technical project")) {
+      return text.replace(/^The candidate highlights/i, "Project work shows").replace("technical project(s)", "technical projects").replace("with production/deployment links", "with deployment proof and practical implementation detail");
+    }
+    if (lower.includes("relevant experience includes")) {
+      return text.replace(/^Relevant experience includes/i, "Industry exposure is visible through").replace("year(s) of total stated background across", "stated years,").replace("internship(s)", "internships").replace("full-time role(s)", "full-time role signals");
+    }
+    if (lower.includes("verified credentials include")) {
+      return text.replace(/^Verified credentials include/i, "Academic and certification signals add credibility through").replace("listed certification(s)", "listed certification");
+    }
+    if (lower.includes("key technologies required by the jd not explicitly found")) {
+      return text.replace(/^Key technologies required by the JD not explicitly found in the resume:/i, "JD-critical skills need clearer resume proof:");
+    }
+    if (lower.includes("additional missing technical requirements")) {
+      return text.replace(/^Additional missing technical requirements:/i, "Additional required technologies are still weak or absent:");
+    }
+    if (lower.includes("requires stronger resume evidence for")) {
+      return text.replace(/^Requires stronger resume evidence for:/i, "Add a project, task, or measurable result connected to");
+    }
+    if (lower.includes("stated experience duration or seniority is below target")) {
+      return "Experience depth appears below the JD target, so stronger ownership and impact details are needed.";
+    }
+    return text;
+  };
   return (
     <article className={`analysis-highlight-card ${className}`}>
       <div className="analysis-highlight-top">
@@ -64,7 +93,7 @@ function AnalysisHighlightCard({ className, icon, eyebrow, title, items }) {
         </div>
       ) : (
         <ul className="analysis-insight-list">
-          {safeItems.length ? safeItems.map((item, index) => <li key={index}>{typeof item === "object" ? (item.strength || item.weakness || item.improvement || JSON.stringify(item)) : item}</li>) : <li>No items found</li>}
+          {safeItems.length ? safeItems.map((item, index) => <li key={index}>{polishItem(item)}</li>) : <li>No items found</li>}
         </ul>
       )}
     </article>
@@ -85,20 +114,8 @@ export default function StudentDashboard() {
     window.scrollTo({ top: 0, behavior: "smooth" });
     document.querySelector(".main-area")?.scrollTo({ top: 0, behavior: "smooth" });
   }, [activeTab]);
-  const getInsightText = (item, preferredKey) => {
-    if (!item) return "";
-    if (typeof item !== "object") return String(item);
-
-    if (item[preferredKey]) return String(item[preferredKey]);
-
-    const textValue = Object.values(item).find(
-      (value) => typeof value === "string" && value.trim()
-    );
-
-    return textValue || JSON.stringify(item);
-  };
-
   const analyzeResume = async () => {
+    if (loading) return;
 
     if (!resume) {
       alert("Upload Resume");
@@ -119,15 +136,11 @@ export default function StudentDashboard() {
 
     try {
 
-      const response = await fetch(
-        "http://127.0.0.1:8000/analyze",
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
-
-      const data = await response.json();
+      const response = await fetch(`${API_URL}/analyze`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await readApiResponse(response);
 
       console.log("Backend Response:", data);
 
@@ -143,11 +156,11 @@ export default function StudentDashboard() {
 
       console.log(err);
 
-      alert("Backend Error");
+      alert(`Backend Error: ${err.message}`);
 
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
 
   };
  const downloadReport = () => {
@@ -195,10 +208,7 @@ export default function StudentDashboard() {
 
   doc.setFont("helvetica", "normal");
 
-  const summary = doc.splitTextToSize(
-    cleanText(result.resume_summary),
-    170
-  );
+  const summary = doc.splitTextToSize(cleanText(buildResumeSummary(result)), 170);
 
   doc.text(summary, 20, y);
 
@@ -336,7 +346,7 @@ export default function StudentDashboard() {
                 onChange={(e)=>setJd(e.target.value)}
               />
 
-              <button onClick={analyzeResume}>
+              <button onClick={analyzeResume} disabled={loading}>
                 {
                   loading
                   ?
@@ -365,14 +375,14 @@ export default function StudentDashboard() {
               <section className="analysis-highlights">
                 <AnalysisHighlightCard className="matched-card" icon="✓" eyebrow="SKILLS ALIGNED" title="Matched Skills" items={result.matched_skills} />
                 <AnalysisHighlightCard className="missing-card" icon="+" eyebrow="GROWTH OPPORTUNITIES" title="Missing Skills" items={result.missing_skills} />
-                <AnalysisHighlightCard className="strength-card" icon="✦" eyebrow="WHAT STANDS OUT" title="Strengths" items={result.strengths} />
-                <AnalysisHighlightCard className="weakness-card" icon="!" eyebrow="NEEDS ATTENTION" title="Weaknesses" items={result.weaknesses} />
+                <AnalysisHighlightCard className="strength-card" icon="✦" eyebrow="WHAT STANDS OUT" title="Strengths" items={getStrengthItems(result)} />
+                <AnalysisHighlightCard className="weakness-card" icon="!" eyebrow="NEEDS ATTENTION" title="Weaknesses" items={getWeaknessItems(result)} />
               </section>              <div className="result-card analysis-detail-card">
 
                 <h3>📄 Resume Summary</h3>
 
                 <p>
-                  {result.resume_summary}
+                  {buildResumeSummary(result)}
                 </p>
 
               </div>

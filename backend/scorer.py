@@ -124,12 +124,13 @@ def _compute_skill_component_with_cached_jd(
     jd_skills: list[str],
     sem_matches: dict[str, str],
     jd_text: str,
+    resume_skills: list[str] | None = None,
 ) -> tuple[float, list[str], list[str], dict[str, float], list[dict]]:
     """
     Same as _compute_skill_component but uses pre-extracted JD skills (for multi-resume batches)
     to avoid redundant Groq API calls.
     """
-    resume_skills = extract_skills(resume_text)
+    resume_skills = resume_skills if resume_skills is not None else extract_skills(resume_text)
     sections = split_sections(jd_text)
     weights = build_skill_weights(jd_skills, sections)
 
@@ -176,6 +177,7 @@ def _compute_skill_component_with_cached_jd(
 def _compute_requirement_component(
     resume_text: str,
     parsed_jd: dict,
+    cached_requirement_embeddings=None,
 ) -> tuple[float, list[dict]]:
     """
     Weighted mean of passage-level coverage scores across all JD requirements.
@@ -185,13 +187,13 @@ def _compute_requirement_component(
     if not requirements:
         return 0.0, []
 
-    covered = requirement_coverage(resume_text, requirements)
+    covered = requirement_coverage(resume_text, requirements, cached_requirement_embeddings)
 
     # Weighted mean coverage
-    weight_sum = sum(r["weight"] for r in covered)
+    weight_sum = sum(float(r.get("weight", 0.5)) for r in covered if isinstance(r, dict))
     weighted_coverage = sum(
-        r["weight"] * r.get("coverage_score", 0.0)
-        for r in covered
+        float(r.get("weight", 0.5)) * float(r.get("coverage_score", 0.0))
+        for r in covered if isinstance(r, dict)
     )
 
     ratio = weighted_coverage / max(weight_sum, 0.001)
@@ -215,7 +217,16 @@ def _compute_experience_component(
     """
     exp_features = features["experience"]
     jd_seniority = parsed_jd.get("seniority", "unknown")
-    jd_years_req = int(parsed_jd.get("years_experience_required", 0))
+    
+    raw_years_req = parsed_jd.get("years_experience_required", 0)
+    try:
+        if isinstance(raw_years_req, (int, float)):
+            jd_years_req = int(raw_years_req)
+        else:
+            match = re.search(r"\d+", str(raw_years_req))
+            jd_years_req = int(match.group()) if match else 0
+    except Exception:
+        jd_years_req = 0
 
     resume_years = exp_features.get("years", 0)
     has_fulltime = exp_features.get("full_time", 0)
@@ -264,6 +275,7 @@ def calculate_score(
     jd_text: str,
     cached_jd_skills: list[str] | None = None,
     cached_parsed_jd: dict | None = None,
+    semantic_cache: dict | None = None,
 ) -> dict:
     """
     Full ATS scoring pipeline.
@@ -293,17 +305,21 @@ def calculate_score(
     # In batch mode, reuse the already extracted JD skills. This prevents one
     # identical Groq JD-skill request per candidate while preserving the same
     # skill-match inputs used by the scoring component.
+    resume_skills = extract_skills(resume_text)
+    semantic_cache = semantic_cache or {}
     sem_matches = semantic_match(
-        resume_text,
-        jd_text,
-        cached_jd_skills=cached_jd_skills,
+        resume_text, jd_text, cached_jd_skills=cached_jd_skills,
+        cached_jd_skill_embeddings=semantic_cache.get("skill_embeddings"),
+        resume_skills=resume_skills,
     )
-    section_sim = compute_section_similarity(resume_text, jd_text)
+    section_sim = compute_section_similarity(
+        resume_text, jd_text, semantic_cache.get("jd_mean_embedding")
+    )
 
     # ── Component 1: Skill coverage (35 pts) ───────────────────────
     if cached_jd_skills:
         skill_score, matched_skills, missing_skills, skill_scores, skill_breakdown = (
-            _compute_skill_component_with_cached_jd(resume_text, cached_jd_skills, sem_matches, jd_text)
+            _compute_skill_component_with_cached_jd(resume_text, cached_jd_skills, sem_matches, jd_text, resume_skills)
         )
     else:
         skill_score, matched_skills, missing_skills, skill_scores, skill_breakdown = (
@@ -311,7 +327,9 @@ def calculate_score(
         )
 
     # ── Component 2: Requirement coverage (30 pts) ─────────────────
-    req_score, covered_requirements = _compute_requirement_component(resume_text, parsed_jd)
+    req_score, covered_requirements = _compute_requirement_component(
+        resume_text, parsed_jd, semantic_cache.get("requirement_embeddings")
+    )
 
     # ── Component 3: Experience fit (20 pts) ───────────────────────
     exp_score = _compute_experience_component(features, parsed_jd, section_sim)
@@ -341,15 +359,14 @@ def calculate_score(
     # Requirement coverage summary for the UI
     req_coverage_summary = [
         {
-            "requirement": r["text"],
-            "category": r["category"],
-            "weight": r["weight"],
-            "coverage": r.get("coverage_score", 0.0),
+            "requirement": r.get("text") or r.get("requirement") or "",
+            "category": r.get("category", "required"),
+            "weight": float(r.get("weight", 0.5)),
+            "coverage": float(r.get("coverage_score", 0.0)),
             "match_type": r.get("match_type", "missing"),
         }
         for r in covered_requirements
-        # Only send high-signal items to keep payload small
-        if r.get("match_type") in ("strong", "partial") or r["weight"] >= 0.6
+        if isinstance(r, dict) and (r.get("match_type") in ("strong", "partial") or float(r.get("weight", 0.5)) >= 0.6)
     ]
 
     return {

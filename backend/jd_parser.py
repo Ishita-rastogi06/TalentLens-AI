@@ -18,7 +18,11 @@ import json
 import logging
 import os
 import re
+from copy import deepcopy
+from functools import lru_cache
 from typing import Optional
+
+from scoring_cache import get_cached, set_cached
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +113,9 @@ def parse_jd_with_groq(jd_text: str) -> Optional[dict]:
                     "content": _JD_PARSE_PROMPT.format(jd_text=jd_text),
                 },
             ],
-            temperature=0.1,
-            timeout=45,
+            temperature=0.0,
+            # A slow provider must not hold the complete recruiter request hostage.
+            timeout=13,
         )
         raw = resp.choices[0].message.content or ""
         raw = raw.replace("```json", "").replace("```", "").strip()
@@ -214,7 +219,8 @@ def _regex_fallback_requirements(jd_text: str) -> list[dict]:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def parse_jd(jd_text: str) -> dict:
+@lru_cache(maxsize=128)
+def _parse_jd_cached(jd_text: str) -> dict:
     """
     Returns:
     {
@@ -224,22 +230,45 @@ def parse_jd(jd_text: str) -> dict:
         "requirements": [ { text, category, skill_type, weight }, ... ]
     }
     """
+    persisted = get_cached("jd_parse", jd_text)
+    if isinstance(persisted, dict) and isinstance(persisted.get("requirements"), list):
+        return persisted
+
     parsed = parse_jd_with_groq(jd_text)
 
     if parsed and isinstance(parsed.get("requirements"), list) and len(parsed["requirements"]) > 0:
-        # Normalise weights: clamp to [0.1, 1.0]
+        normalized_reqs = []
         for req in parsed["requirements"]:
-            req["weight"] = max(0.1, min(1.0, float(req.get("weight", 0.5))))
-        return parsed
+            if isinstance(req, dict):
+                text_val = str(req.get("text") or req.get("requirement") or req.get("description") or "").strip()
+                if text_val:
+                    req["text"] = text_val
+                    req["category"] = str(req.get("category") or "required").lower()
+                    req["skill_type"] = str(req.get("skill_type") or "technical").lower()
+                    try:
+                        req["weight"] = max(0.1, min(1.0, float(req.get("weight", 0.5))))
+                    except Exception:
+                        req["weight"] = 0.5
+                    normalized_reqs.append(req)
+        if normalized_reqs:
+            parsed["requirements"] = normalized_reqs
+            set_cached("jd_parse", jd_text, parsed)
+            return parsed
 
     # Fallback
     logger.info("Using regex fallback for JD parsing.")
-    return {
+    fallback = {
         "job_title": "Unknown",
         "seniority": "unknown",
         "years_experience_required": 0,
         "requirements": _regex_fallback_requirements(jd_text),
     }
+    return fallback
+
+
+def parse_jd(jd_text: str) -> dict:
+    """Parse each exact JD once per backend process to keep scoring stable."""
+    return deepcopy(_parse_jd_cached(jd_text))
 
 
 # ── Legacy compatibility (used by scorer.py internals) ───────────────────────

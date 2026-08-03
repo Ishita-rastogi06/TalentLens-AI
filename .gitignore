@@ -13,6 +13,7 @@ __pycache__/
 .env.local
 backend/.env
 !.env.example
+backend/.cache/
 
 # ---------- Node / Frontend ----------
 node_modules/
@@ -42,3 +43,4 @@ uploads/
 
 # ---------- Personal — do not publish ----------
 Helper.txt
+Changes.md

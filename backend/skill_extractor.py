@@ -17,9 +17,11 @@ import json
 import logging
 import os
 import re
+from functools import lru_cache
 from typing import Optional
 
 from synonyms import SKILL_SYNONYMS
+from scoring_cache import get_cached, set_cached
 
 logger = logging.getLogger(__name__)
 
@@ -150,12 +152,17 @@ def _get_groq_client():
         return None
 
 
+@lru_cache(maxsize=128)
 def extract_skills_groq(text: str) -> list[str]:
     """
     Use Groq to extract skills that the regex pass may miss
     (domain-specific, emerging, or unusual naming).
     Returns empty list on any failure — graceful degradation.
     """
+    persisted = get_cached("jd_skills", text)
+    if isinstance(persisted, list) and all(isinstance(skill, str) for skill in persisted):
+        return persisted
+
     client = _get_groq_client()
     if client is None:
         return []
@@ -175,12 +182,15 @@ def extract_skills_groq(text: str) -> list[str]:
                 },
             ],
             temperature=0.0,
-            timeout=30,
+            # This runs once per JD; return regex results promptly if Groq is slow.
+            timeout=13,
         )
         raw = resp.choices[0].message.content or ""
         raw = raw.replace("```json", "").replace("```", "").strip()
         data = json.loads(raw)
         skills = [s.strip().lower() for s in data.get("skills", []) if isinstance(s, str)]
+        if skills:
+            set_cached("jd_skills", text, skills)
         return skills
     except Exception as exc:
         logger.debug("Groq skill extraction failed (%s): %s", type(exc).__name__, exc)

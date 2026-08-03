@@ -3,6 +3,12 @@ import { useState } from "react";
 import Chatbot from "../components/Chatbot";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { API_URL, readApiResponse } from "../config/api";
+import {
+  buildResumeSummary,
+  getStrengthItems,
+  getWeaknessItems,
+} from "../utils/analysisSummary";
 import {
   ResponsiveContainer,
   Tooltip,
@@ -12,23 +18,17 @@ import {
 } from "recharts";
 
 function AnalysisScoreCard({ candidate }) {
-  const count = (items) => (Array.isArray(items) ? items.length : 0);
   const clamp = (value) => Math.min(1, Math.max(0, value));
   const score = Math.round(Number(candidate?.score || 0));
-  const matched = count(candidate?.matched_skills);
-  const missing = count(candidate?.missing_skills);
-  const strengths = count(candidate?.strengths);
-  const weaknesses = count(candidate?.weaknesses);
-  const skillRatio = clamp(matched / Math.max(matched + missing, 1));
-  const experienceRatio = clamp(strengths / Math.max(strengths + weaknesses, 1));
-  const profileRatio = clamp(
-    (matched + strengths) / Math.max(matched + missing + strengths + weaknesses, 1)
-  );
+  // These values come directly from the backend's README scoring model.
+  // Never estimate component points from the number of skills or AI comments.
+  const components = candidate?.score_components || {};
+  const componentRatio = (key, total) => clamp(Number(components[key] || 0) / total);
   const metrics = [
-    { label: "Skill Match", ratio: skillRatio, total: 35 },
-    { label: "Requirement Coverage", ratio: skillRatio, total: 20 },
-    { label: "Experience Fit", ratio: experienceRatio, total: 20 },
-    { label: "Profile Signals", ratio: profileRatio, total: 25 },
+    { label: "Skill Match", ratio: componentRatio("skill_match", 35), total: 35 },
+    { label: "Requirement Coverage", ratio: componentRatio("requirement_coverage", 30), total: 30 },
+    { label: "Experience Fit", ratio: componentRatio("experience_fit", 20), total: 20 },
+    { label: "Profile Signals", ratio: componentRatio("profile_signals", 15), total: 15 },
   ];
   const label =
     score >= 75
@@ -80,8 +80,32 @@ function AnalysisScoreCard({ candidate }) {
 function AnalysisHighlightCard({ className, icon, eyebrow, title, items }) {
   const safeItems = Array.isArray(items) ? items : [];
   const itemText = (item) => {
-    if (typeof item !== "object" || item === null) return String(item ?? "");
-    return String(item.strength || item.weakness || item.improvement || JSON.stringify(item));
+    const text = typeof item !== "object" || item === null
+      ? String(item ?? "")
+      : String(item.strength || item.weakness || item.improvement || JSON.stringify(item));
+    const lower = text.toLowerCase();
+    if (lower.includes("the candidate highlights") && lower.includes("technical project")) {
+      return text.replace(/^The candidate highlights/i, "Project work shows").replace("technical project(s)", "technical projects").replace("with production/deployment links", "with deployment proof and practical implementation detail");
+    }
+    if (lower.includes("relevant experience includes")) {
+      return text.replace(/^Relevant experience includes/i, "Industry exposure is visible through").replace("year(s) of total stated background across", "stated years,").replace("internship(s)", "internships").replace("full-time role(s)", "full-time role signals");
+    }
+    if (lower.includes("verified credentials include")) {
+      return text.replace(/^Verified credentials include/i, "Academic and certification signals add credibility through").replace("listed certification(s)", "listed certification");
+    }
+    if (lower.includes("key technologies required by the jd not explicitly found")) {
+      return text.replace(/^Key technologies required by the JD not explicitly found in the resume:/i, "JD-critical skills need clearer resume proof:");
+    }
+    if (lower.includes("additional missing technical requirements")) {
+      return text.replace(/^Additional missing technical requirements:/i, "Additional required technologies are still weak or absent:");
+    }
+    if (lower.includes("requires stronger resume evidence for")) {
+      return text.replace(/^Requires stronger resume evidence for:/i, "Add a project, task, or measurable result connected to");
+    }
+    if (lower.includes("stated experience duration or seniority is below target")) {
+      return "Experience depth appears below the JD target, so stronger ownership and impact details are needed.";
+    }
+    return text;
   };
 
   return (
@@ -122,7 +146,6 @@ export default function RecruiterDashboard() {
   const [jd, setJd] = useState("");
   const [loading, setLoading] = useState(false);
   const [ranking, setRanking] = useState([]);
-  const [chatAnalysis, setChatAnalysis] = useState(null);
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -148,6 +171,8 @@ export default function RecruiterDashboard() {
   const verdictHasData = verdictData.some((item) => item.value > 0);
 
   const analyzeResumes = async () => {
+    if (loading) return;
+
     if (resumes.length === 0) {
       alert("Please upload resumes.");
       return;
@@ -165,14 +190,14 @@ export default function RecruiterDashboard() {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 120000);
-      const response = await fetch("http://127.0.0.1:8000/analyze", {
+      const response = await fetch(`${API_URL}/analyze`, {
         method: "POST",
         body: formData,
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
 
-      const data = await response.json();
+      const data = await readApiResponse(response);
       console.log(data);
       if (data.ranking) {
         setRanking(data.ranking);
@@ -181,12 +206,13 @@ export default function RecruiterDashboard() {
     } catch (err) {
       console.log(err);
       if (err.name === "AbortError") {
-        alert("Analysis taking too long. Please check backend is running on http://127.0.0.1:8000");
+        alert(`Analysis taking too long. Please check backend is running on ${API_URL}`);
       } else {
         alert("Backend Error: " + err.message);
       }
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const exportPDF = () => {
@@ -206,13 +232,15 @@ export default function RecruiterDashboard() {
     pdf.text(`Candidate: ${selectedCandidate.name}`, 14, 45);
     pdf.text(`Rank: #${selectedCandidate.rank}`, 14, 53);
     pdf.text(`ATS Score: ${selectedCandidate.score}%`, 14, 61);
-    const verdict = (selectedCandidate.verdict || "").replace(/[^\x00-\x7F]/g, "");
+    const verdict = Array.from(selectedCandidate.verdict || "")
+      .filter((character) => character.charCodeAt(0) <= 0x7f)
+      .join("");
     pdf.text(`Verdict: ${verdict}`, 14, 69);
 
     pdf.setFont("helvetica", "bold");
     pdf.text("Resume Summary", 14, 82);
     pdf.setFont("helvetica", "normal");
-    const summary = pdf.splitTextToSize(selectedCandidate.resume_summary || "No summary available.", 180);
+    const summary = pdf.splitTextToSize(buildResumeSummary(selectedCandidate, selectedCandidate.name), 180);
     pdf.text(summary, 14, 90);
     let y = 90 + summary.length * 7 + 8;
 
@@ -262,7 +290,7 @@ export default function RecruiterDashboard() {
               </label>
               {resumes.length > 0 && <div className="selected-file-list"><h3>Selected Resumes</h3><ul>{resumes.map((file, index) => <li key={index}>{file.name}</li>)}</ul></div>}
               <textarea placeholder="Paste Job Description" value={jd} onChange={(e) => setJd(e.target.value)} />
-              <button onClick={analyzeResumes}>{loading ? "Analyzing..." : "Analyze Candidates"}</button>
+              <button onClick={analyzeResumes} disabled={loading}>{loading ? "Analyzing..." : "Analyze Candidates"}</button>
             </div>
           </>
         )}
@@ -276,7 +304,7 @@ export default function RecruiterDashboard() {
                   key={index}
                   className="result-card"
                   style={{ cursor: "pointer", marginTop: 0, padding: "28px", background: "#fffdf9", color: "#123549", border: "1.5px solid #d7ae88", borderLeft: "6px solid #bc965d", borderRadius: "20px", boxShadow: "0 8px 18px rgba(80, 32, 58, 0.10)" }}
-                  onClick={() => { setSelectedCandidate(candidate); setChatAnalysis(ranking); setActiveTab("analysis"); }}
+                  onClick={() => { setSelectedCandidate(candidate); setActiveTab("analysis"); }}
                 >
                   <h2 style={{ color: "#6e1837", fontSize: "34px", marginBottom: "10px" }}>#{candidate.rank}</h2>
                   <h3 style={{ color: "#123549", fontSize: "22px", marginBottom: "14px" }}>{candidate.name}</h3>
@@ -301,10 +329,10 @@ export default function RecruiterDashboard() {
               <section className="analysis-highlights">
                 <AnalysisHighlightCard className="matched-card" icon="✓" eyebrow="SKILLS ALIGNED" title="Matched Skills" items={selectedCandidate.matched_skills} />
                 <AnalysisHighlightCard className="missing-card" icon="+" eyebrow="GROWTH OPPORTUNITIES" title="Missing Skills" items={selectedCandidate.missing_skills} />
-                <AnalysisHighlightCard className="strength-card" icon="✦" eyebrow="WHAT STANDS OUT" title="Strengths" items={selectedCandidate.strengths} />
-                <AnalysisHighlightCard className="weakness-card" icon="!" eyebrow="NEEDS ATTENTION" title="Weaknesses" items={selectedCandidate.weaknesses} />
+                <AnalysisHighlightCard className="strength-card" icon="✦" eyebrow="WHAT STANDS OUT" title="Strengths" items={getStrengthItems(selectedCandidate)} />
+                <AnalysisHighlightCard className="weakness-card" icon="!" eyebrow="NEEDS ATTENTION" title="Weaknesses" items={getWeaknessItems(selectedCandidate)} />
               </section>
-              <div className="result-card analysis-detail-card"><h3>📄 Resume Summary</h3><p>{selectedCandidate.resume_summary || "No summary available."}</p></div>
+              <div className="result-card analysis-detail-card"><h3>📄 Resume Summary</h3><p>{buildResumeSummary(selectedCandidate, selectedCandidate.name)}</p></div>
               <div className="result-card analysis-detail-card analysis-improvement-card"><h3>🚀 Improvement Suggestions</h3><ul>{(selectedCandidate.improvements || []).map((item, index) => <li key={index}>{typeof item === "object" ? item.improvement : item}</li>)}</ul></div>
               {selectedCandidate.reasoning && <div className="result-card analysis-detail-card"><h3>📌 Why this Score?</h3><p>{selectedCandidate.reasoning}</p></div>}
               <div className="result-card analysis-detail-card analysis-skill-breakdown-card"><h3>📊 Skill Breakdown</h3>{Object.entries(selectedCandidate.skill_scores || {}).map(([skill, value]) => <div key={skill} style={{ marginBottom: "18px" }}><div style={{ display: "flex", justifyContent: "space-between" }}><span>{skill}</span><span>{value}%</span></div><div className="progress"><div className="progress-fill" style={{ width: `${value}%` }}></div></div></div>)}</div>
